@@ -159,14 +159,14 @@ Verify: test the use case with a small fixture KB.
 Add a command-line entrypoint:
 
 ```text
-infrastructure/knowledge_sources/markdown/
-  cli.py
+entrypoints/cli/
+  markdown_extraction.py
 ```
 
 Command shape:
 
 ```bash
-uv run python -m infrastructure.knowledge_sources.markdown.cli --kb-path sample_company_kb
+uv run python -m entrypoints.cli.markdown_extraction --kb-path sample_company_kb
 ```
 
 Goal: make ingestion runnable without starting the API.

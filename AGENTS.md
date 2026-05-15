@@ -6,10 +6,11 @@ This project follows the `ats-service` style split, kept intentionally minimal:
 - `domain/` — pure business concepts and exceptions.
 - `application/use_cases/` — orchestration code.
 - `infrastructure/` — external adapters when you add them.
-- `entrypoints/http/` — FastAPI app, routers, and HTTP wiring.
+- `entrypoints/` — HTTP and CLI entrypoints.
 - `tests/integration/` — executable behavior checks.
 
-AI, RAG, embeddings, Qdrant, and ingestion are intentionally not implemented in this scaffold.
+AI, RAG, embeddings, and Qdrant are intentionally not implemented in this scaffold. Markdown extraction exists as the
+first ingestion learning slice.
 
 ## Commands
 - `uv sync` — install dependencies.
@@ -24,4 +25,3 @@ Python 3.13+, 120-character line length, double quotes. Keep `__init__.py` files
 
 ## Git
 Stage new files after creating them. Do not commit unless explicitly asked.
-
