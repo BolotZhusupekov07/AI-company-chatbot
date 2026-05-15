@@ -1,0 +1,15 @@
+groups:
+  employees:
+    description: All full-time employees.
+  engineering:
+    description: Engineers and technical leads.
+  hr:
+    description: HR and people operations team.
+  finance:
+    description: Finance and payroll team.
+  support:
+    description: Customer support and production support staff.
+  people-managers:
+    description: Managers responsible for probation, performance, and staffing decisions.
+  interns:
+    description: Internship users with limited access.

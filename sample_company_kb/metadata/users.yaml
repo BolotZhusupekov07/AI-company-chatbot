@@ -1,0 +1,42 @@
+users:
+  aida.mamatova@ala-too-digital.kg:
+    full_name: Aida Mamatova
+    location: Bishkek, Kyrgyzstan
+    department: Engineering
+    groups:
+      - employees
+      - engineering
+  timur.osmonov@ala-too-digital.kg:
+    full_name: Timur Osmonov
+    location: Bishkek, Kyrgyzstan
+    department: HR
+    groups:
+      - employees
+      - hr
+  elina.kadyrova@ala-too-digital.kg:
+    full_name: Elina Kadyrova
+    location: Bishkek, Kyrgyzstan
+    department: Finance
+    groups:
+      - employees
+      - finance
+  ruslan.bekov@ala-too-digital.kg:
+    full_name: Ruslan Bekov
+    location: Bishkek, Kyrgyzstan
+    department: Customer Support
+    groups:
+      - employees
+      - support
+  nurlan.sadykov@ala-too-digital.kg:
+    full_name: Nurlan Sadykov
+    location: Bishkek, Kyrgyzstan
+    department: Product
+    groups:
+      - employees
+      - people-managers
+  intern@ala-too-digital.kg:
+    full_name: Intern User
+    location: Bishkek, Kyrgyzstan
+    department: Internship
+    groups:
+      - interns
