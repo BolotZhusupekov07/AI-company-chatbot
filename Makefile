@@ -20,5 +20,4 @@ check: lint typecheck test
 
 .PHONY: run
 run:
-	uv run python -m main
-
+	uv run python -m app.main

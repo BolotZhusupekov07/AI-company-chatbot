@@ -1,13 +1,16 @@
 # Repository Guidelines
 
 ## Project Shape
-This project follows the `ats-service` style split, kept intentionally minimal:
+This project follows a simple API service structure, matching the `ai-hr-chatbot` style and kept intentionally minimal:
 
-- `domain/` — pure business concepts and exceptions.
-- `application/use_cases/` — orchestration code.
-- `infrastructure/` — external adapters when you add them.
-- `entrypoints/` — HTTP and CLI entrypoints.
-- `tests/integration/` — executable behavior checks.
+- `app/main.py` — FastAPI app factory and local run entrypoint.
+- `app/api/` — HTTP routers and request/response schemas.
+- `app/core/` — settings and core application wiring.
+- `app/services/` — orchestration code when you add it.
+- `app/infrastructure/` — external adapters when you add them.
+- `app/knowledge/` — internal knowledge schemas.
+- `app/cli/` — CLI utilities.
+- `tests/api/` and `tests/unit/` — executable behavior checks.
 
 AI, RAG, embeddings, and Qdrant are intentionally not implemented in this scaffold. Markdown extraction exists as the
 first ingestion learning slice.

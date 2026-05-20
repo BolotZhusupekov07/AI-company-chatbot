@@ -34,11 +34,15 @@ make check
 ## Structure
 
 ```text
-domain/                 Business concepts
-application/use_cases/  Application orchestration
-infrastructure/         External adapters you add later
-entrypoints/http/       FastAPI app and routes
-tests/integration/      Integration-style tests
+app/main.py                         FastAPI app factory and run hook
+app/api/                            HTTP routers and API schemas
+app/core/                           Settings and core wiring
+app/services/                       Orchestration code you add later
+app/infrastructure/                 External adapters you add later
+app/knowledge/                      Internal knowledge schemas
+app/cli/                            CLI utilities
+tests/api/                          API tests
+tests/unit/                         Unit tests
 ```
 
 ## Implementation Roadmap
@@ -83,10 +87,10 @@ Verify: open the files manually and make sure every document has frontmatter and
 
 ### Step 2: Define Source Document Schemas
 
-Add domain models for loaded knowledge files:
+Add internal models for loaded knowledge files:
 
 ```text
-domain/knowledge/
+app/knowledge/
   schemas/
     model.py
 ```
@@ -115,7 +119,7 @@ Verify: write a test that constructs `SourceDocument` with valid data.
 Add a Markdown source adapter:
 
 ```text
-infrastructure/knowledge_sources/markdown/
+app/infrastructure/knowledge_sources/markdown/
   loader.py
 ```
 
@@ -136,9 +140,9 @@ Verify: write a test that loads a temporary Markdown file and checks the parsed 
 Add orchestration for loading documents:
 
 ```text
-application/use_cases/ingestion/
-  ingest_markdown.py
-domain/ingestion/
+app/services/
+  ingestion_service.py
+app/knowledge/
   schemas/model.py
 ```
 
@@ -159,14 +163,14 @@ Verify: test the use case with a small fixture KB.
 Add a command-line entrypoint:
 
 ```text
-entrypoints/cli/
+app/cli/
   markdown_extraction.py
 ```
 
 Command shape:
 
 ```bash
-uv run python -m entrypoints.cli.markdown_extraction --kb-path sample_company_kb
+uv run python -m app.cli.markdown_extraction --kb-path sample_company_kb
 ```
 
 Goal: make ingestion runnable without starting the API.
@@ -175,13 +179,13 @@ Verify: run the command and print the ingestion report as JSON.
 
 ### Step 6: Add Structure-Aware Chunking
 
-Add chunking as domain/application behavior before embeddings:
+Add chunking as service behavior before embeddings:
 
 ```text
-domain/chunking/
+app/knowledge/
   schemas/model.py
-application/use_cases/chunking/
-  chunk_document.py
+app/services/
+  chunking_service.py
 ```
 
 Start simple:
@@ -202,8 +206,8 @@ Use local YAML instead of Jira:
 
 ```text
 sample_company_kb/metadata/users.yaml
-domain/identity/
-infrastructure/identity/local_yaml/
+app/identity/
+app/infrastructure/identity/local_yaml/
 ```
 
 Example:
@@ -242,7 +246,7 @@ Verify: test employee-only, HR-only, user-specific, and inaccessible chunks.
 Add only the interface first:
 
 ```text
-domain/llm/interfaces/
+app/services/interfaces/
   embedding_provider.py
 ```
 
@@ -269,7 +273,7 @@ Recommended for your target architecture:
 Keep the provider in infrastructure:
 
 ```text
-infrastructure/embeddings/
+app/infrastructure/embeddings/
   bedrock_cohere_provider.py
 ```
 
@@ -284,7 +288,7 @@ Add Qdrant to Docker Compose only when embeddings work.
 Then add:
 
 ```text
-infrastructure/vector_store/qdrant/
+app/infrastructure/vector_store/qdrant/
   client.py
   collection.py
   repository.py
@@ -309,8 +313,8 @@ Verify: upsert a few chunks and retrieve them by ID before doing semantic search
 Add a retrieval use case:
 
 ```text
-application/use_cases/retrieval/
-  search_knowledge.py
+app/services/
+  retrieval_service.py
 ```
 
 Flow:
@@ -330,14 +334,15 @@ Verify: ask the same query as `alice@example.com` and `bob@example.com`; HR-only
 Before answer generation, expose retrieval through HTTP:
 
 ```text
-entrypoints/http/routers/
-  chats.py
+app/api/v1/chats/
+  routes.py
+  schemas.py
 ```
 
 Start with an endpoint that returns retrieved chunks:
 
 ```text
-POST /api/v1/chats/messages
+POST /v1/chats/messages
 ```
 
 Request:
@@ -358,7 +363,7 @@ Verify: write an HTTP test with fake retrieval.
 Add only the interface first:
 
 ```text
-domain/llm/interfaces/
+app/services/interfaces/
   chat_provider.py
 ```
 
@@ -373,8 +378,8 @@ Verify: test answer orchestration with a fake provider.
 Add an answer use case:
 
 ```text
-application/use_cases/answering/
-  answer_from_context.py
+app/services/
+  answering_service.py
 ```
 
 The prompt must require:
@@ -398,7 +403,7 @@ Recommended provider for your target architecture:
 Keep it in infrastructure:
 
 ```text
-infrastructure/llms/
+app/infrastructure/llms/
   bedrock_chat_provider.py
 ```
 
@@ -418,7 +423,7 @@ Tables:
 Keep storage in:
 
 ```text
-infrastructure/storage/postgres/
+app/infrastructure/storage/postgres/
 ```
 
 Goal: store conversations and load the last N messages for context.
@@ -518,7 +523,7 @@ Keep the normal JSON endpoint as the primary API.
 Add SSE only after the synchronous path is stable:
 
 ```text
-POST /api/v1/chats/messages/stream
+POST /v1/chats/messages/stream
 ```
 
 Goal: improve UX without changing core answer logic.
