@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
 
+    AWS_REGION_NAME: str = "eu-west-1"
+
     model_config = SettingsConfigDict(env_file=ENV_PATH, extra="allow", frozen=True)
 
 
