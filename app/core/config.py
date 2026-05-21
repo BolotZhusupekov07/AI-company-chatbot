@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     AWS_REGION_NAME: str = "eu-west-1"
+    QDRANT_URL: str = "http://localhost:6335"
+    QDRANT_API_KEY: str | None = None
+    QDRANT_COLLECTION_NAME: str = "company_knowledge_chunks"
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, extra="allow", frozen=True)
 
