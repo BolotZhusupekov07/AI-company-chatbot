@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
-from typing import Sequence
+from collections.abc import Sequence
+
 from app.core.config import get_settings
 from app.infrastructure.embeddings.bedrock_cohere_provider import BedrockCohereEmbeddingProvider
 from app.infrastructure.vector_store.qdrant.client import build_qdrant_client
@@ -11,7 +12,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     parser = ArgumentParser(description="Run dense search")
     parser.add_argument("query")
-    
+
     args = parser.parse_args(argv)
 
     if not args.query.strip():
@@ -28,7 +29,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         query_vector,
         limit=3,
         query_filter=build_acl_filter("example@gmail.com", ["hr"]),
-        score_threshold=0.5
+        score_threshold=0.5,
     )
 
     print(

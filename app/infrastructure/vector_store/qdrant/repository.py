@@ -6,7 +6,6 @@ from uuid import NAMESPACE_URL, uuid5
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient, models
 
-from app.core.config import Settings, get_settings
 from app.knowledge.schemas import model as knowledge_model
 
 
@@ -163,7 +162,7 @@ def build_acl_filter(user_email: str, user_groups: Sequence[str]) -> models.Filt
     email = user_email.strip().lower()
     groups = [group.strip() for group in user_groups if group.strip()]
 
-    should_conditions = [
+    should_conditions: list[models.Condition] = [
         models.FieldCondition(
             key="allowed_users",
             match=models.MatchValue(value=email),
