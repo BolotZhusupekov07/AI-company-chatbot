@@ -143,21 +143,8 @@ class MarkdownChunker:
                 chunks.extend(self._chunk_table(prefix, intro, block.text))
                 continue
 
-            for piece in self._split_text_block(prefix, block.text):
-                if not current_content:
-                    current_content = piece
-                    continue
-
-                combined_content = _join_markdown_parts([current_content, piece])
-                if self._fits_with_prefix(prefix, combined_content):
-                    current_content = combined_content
-                    continue
-
-                chunks.append(_join_markdown_parts([prefix, current_content]))
-                overlap = _ending_overlap(current_content, self.overlap_characters)
-                current_content = _join_markdown_parts([overlap, piece]) if overlap else piece
-                if not self._fits_with_prefix(prefix, current_content) and overlap:
-                    current_content = piece
+            block_chunks, current_content = self._chunk_text_block(prefix, current_content, block.text)
+            chunks.extend(block_chunks)
 
         if current_content:
             chunks.append(_join_markdown_parts([prefix, current_content]))
@@ -166,6 +153,37 @@ class MarkdownChunker:
             chunks.append(prefix)
 
         return chunks
+
+    def _chunk_text_block(self, prefix: str, current_content: str, text: str) -> tuple[list[str], str]:
+        chunks: list[str] = []
+
+        for piece in self._split_text_block(prefix, text):
+            chunk, current_content = self._append_text_piece(prefix, current_content, piece)
+            if chunk is not None:
+                chunks.append(chunk)
+
+        return chunks, current_content
+
+    def _append_text_piece(
+        self,
+        prefix: str,
+        current_content: str,
+        piece: str,
+    ) -> tuple[str | None, str]:
+        if not current_content:
+            return None, piece
+
+        combined_content = _join_markdown_parts([current_content, piece])
+        if self._fits_with_prefix(prefix, combined_content):
+            return None, combined_content
+
+        chunk = _join_markdown_parts([prefix, current_content])
+        overlap = _ending_overlap(current_content, self.overlap_characters)
+        next_content = _join_markdown_parts([overlap, piece]) if overlap else piece
+        if not self._fits_with_prefix(prefix, next_content) and overlap:
+            return chunk, piece
+
+        return chunk, next_content
 
     def _chunk_table(self, prefix: str, intro: str, table_text: str) -> list[str]:
         table_prefix = _join_markdown_parts([prefix, intro])
