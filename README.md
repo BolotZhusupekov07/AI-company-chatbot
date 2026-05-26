@@ -1,22 +1,136 @@
 # AI Chatbot Company
 
-Minimal project scaffold for learning how to build a company knowledge chatbot step by step.
+Minimal FastAPI project for learning how to build a company knowledge chatbot. The current implementation covers local
+Markdown ingestion, structure-aware chunking, Bedrock Cohere embeddings, Qdrant vector storage, and dense search.
 
-This setup only gives you the application structure and a working FastAPI health endpoint. AI-related parts are intentionally left for you to build:
+## What Is Implemented
 
-- knowledge extraction
-- chunking
-- embeddings
-- Qdrant indexing
-- retrieval
-- reranking
-- answer generation
+- FastAPI application with health checks.
+- Sample company knowledge base in `sample_company_kb/`.
+- Markdown loader that parses YAML frontmatter into `SourceDocument` models.
+- Structure-aware Markdown chunking into `KnowledgeChunk` models.
+- AWS Bedrock Cohere Embed Multilingual v3 provider.
+- Local Qdrant vector store integration.
+- Ingestion CLI that loads, chunks, embeds, and stores chunks in Qdrant.
+- Dense-search CLI that embeds a query and searches Qdrant.
+- Basic Qdrant ACL filter helper using `allowed_users` and `allowed_groups`.
 
-## Local Setup
+Not implemented yet:
+
+- Trusted identity resolution from `sample_company_kb/metadata/users.yaml`.
+- HTTP chat or retrieval endpoint.
+- LLM answer generation.
+- Hybrid search, reranking, chat memory, evaluations, and streaming.
+
+## How It Works
+
+The current data flow is:
+
+```text
+sample_company_kb/*.md
+  -> MarkdownKnowledgeLoader
+  -> SourceDocument
+  -> MarkdownChunker
+  -> KnowledgeChunk
+  -> BedrockCohereEmbeddingProvider.embed_chunks()
+  -> QdrantVectorRepository.upsert_chunks()
+  -> Qdrant collection
+```
+
+Dense search works like this:
+
+```text
+user query
+  -> BedrockCohereEmbeddingProvider.embed_query()
+  -> optional Qdrant ACL filter
+  -> QdrantVectorRepository.search_dense()
+  -> scored chunk payloads
+```
+
+Qdrant payloads store:
+
+- `chunk_id`
+- `source_id`
+- `document_group_id`
+- `language`
+- `space`
+- `allowed_users`
+- `allowed_groups`
+- `text`
+- `chunk_index`
+- `character_count`
+
+## Project Structure
+
+```text
+app/main.py                         FastAPI app factory and local run entrypoint
+app/api/                            HTTP routers and schemas
+app/core/                           settings and core wiring
+app/services/                       application services such as chunking
+app/infrastructure/embeddings/      Bedrock Cohere embedding adapter
+app/infrastructure/knowledge_sources/ Markdown source loader
+app/infrastructure/vector_store/    Qdrant vector store adapter
+app/knowledge/                      internal knowledge schemas
+app/cli/                            CLI scripts
+sample_company_kb/                  local sample knowledge base
+tests/api/                          API behavior checks
+tests/unit/                         unit behavior checks
+docs/learning-roadmap.md            implementation roadmap
+```
+
+## Prerequisites
+
+- Python 3.13 or newer.
+- `uv`.
+- Docker, for local Qdrant.
+- AWS credentials with access to Bedrock Cohere Embed Multilingual v3.
+
+The app uses normal `boto3` credential discovery. Configure credentials through your AWS profile, environment variables,
+or another supported AWS credential source.
+
+## Setup
+
+Install dependencies:
 
 ```bash
 uv sync
+```
+
+Create local config:
+
+```bash
 cp config/.env.example config/.env
+```
+
+Important config values:
+
+```env
+AWS_REGION_NAME=eu-central-1
+QDRANT_URL=http://localhost:6335
+QDRANT_API_KEY=
+QDRANT_COLLECTION_NAME=company_knowledge_chunks
+```
+
+Start Qdrant:
+
+```bash
+docker compose up -d qdrant
+```
+
+The included compose file maps:
+
+- host `6335` to Qdrant HTTP port `6333`
+- host `6336` to Qdrant gRPC port `6334`
+
+Check Qdrant:
+
+```bash
+curl http://localhost:6335/collections
+```
+
+## Run The API
+
+```bash
 make run
 ```
 
@@ -25,533 +139,70 @@ API docs:
 - http://localhost:8000/docs
 - http://localhost:8000/redoc
 
+Health checks are available through the FastAPI app. Chat and retrieval HTTP endpoints are not implemented yet.
+
+## Run CLI Scripts
+
+### Ingest Knowledge Into Qdrant
+
+This command loads Markdown from `sample_company_kb/`, chunks it, embeds chunks with Bedrock Cohere, creates the Qdrant
+collection if needed, and upserts chunk vectors plus payloads.
+
+```bash
+uv run python -m app.cli.ingestion_pipeline
+```
+
+Expected output is a short report like:
+
+```text
+Loaded 20 documents, created 20 chunks, embedded 20 vectors.
+Embeddings are stored
+```
+
+The exact chunk count can change when chunking settings or knowledge files change.
+
+### Run Dense Search
+
+Run this after ingestion has stored vectors in Qdrant:
+
+```bash
+uv run python -m app.cli.dense_search "How do I access VPN?"
+```
+
+The script embeds the query with Cohere, searches Qdrant, and prints matching chunk payloads with scores.
+
+Current dense-search CLI behavior:
+
+- uses `QDRANT_COLLECTION_NAME` from `config/.env`
+- returns up to 3 results
+- applies a basic ACL filter using the hardcoded user/groups in the script
+- applies a score threshold of `0.5`
+
+Those values should move behind CLI flags or a retrieval service when the next retrieval slice is implemented.
+
 ## Checks
+
+Run all checks:
 
 ```bash
 make check
 ```
 
-## Structure
-
-```text
-domain/                 Business concepts
-application/use_cases/  Application orchestration
-infrastructure/         External adapters you add later
-entrypoints/http/       FastAPI app and routes
-tests/integration/      Integration-style tests
-```
-
-## Implementation Roadmap
-
-Build this project one working slice at a time. Do not start with the LLM. First make data flow through the system in a boring, testable way.
-
-### Step 1: Add Sample Company Knowledge
-
-Create a local folder that replaces Confluence for the pet project:
-
-```text
-sample_company_kb/
-  hr/
-    vacation-policy.en.md
-    sick-leave.en.md
-    remote-work.en.md
-  it/
-    vpn-access.en.md
-  metadata/
-    users.yaml
-```
-
-Each Markdown document should have YAML frontmatter:
-
-```yaml
----
-title: Vacation Policy
-document_group_id: vacation-policy
-language: en
-space: hr
-allowed_users: []
-allowed_groups:
-  - employees
-version: 1
-updated_at: "2026-05-15T09:00:00Z"
----
-```
-
-Goal: have 10-20 small documents with headings, lists, and at least one table.
-
-Verify: open the files manually and make sure every document has frontmatter and useful body text.
-
-### Step 2: Define Source Document Schemas
-
-Add domain models for loaded knowledge files:
-
-```text
-domain/knowledge/
-  schemas/
-    model.py
-```
-
-Create a `SourceDocument` model with fields like:
-
-- `source_id`
-- `title`
-- `document_group_id`
-- `language`
-- `space`
-- `content_markdown`
-- `allowed_users`
-- `allowed_groups`
-- `version`
-- `updated_at`
-- `content_hash`
-- `citation_url`
-
-Goal: define the internal shape your app uses regardless of where knowledge comes from.
-
-Verify: write a test that constructs `SourceDocument` with valid data.
-
-### Step 3: Implement Markdown Loading
-
-Add a Markdown source adapter:
-
-```text
-infrastructure/knowledge_sources/markdown/
-  loader.py
-```
-
-The loader should:
-
-- scan `sample_company_kb/**/*.md`
-- parse YAML frontmatter
-- return `SourceDocument` objects
-- compute a stable `content_hash`
-- build `citation_url` values like `kb://hr/vacation-policy.en.md`
-
-Goal: replace Confluence with a simple local source.
-
-Verify: write a test that loads a temporary Markdown file and checks the parsed fields.
-
-### Step 4: Add An Ingestion Use Case
-
-Add orchestration for loading documents:
-
-```text
-application/use_cases/ingestion/
-  ingest_markdown.py
-domain/ingestion/
-  schemas/model.py
-```
-
-Start with a simple ingestion report:
-
-- `documents_seen`
-- `documents_loaded`
-- `failed_documents`
-
-Do not add embeddings yet.
-
-Goal: run one command or function that loads all knowledge documents and returns a report.
-
-Verify: test the use case with a small fixture KB.
-
-### Step 5: Add An Ingestion CLI
-
-Add a command-line entrypoint:
-
-```text
-infrastructure/knowledge_sources/markdown/
-  cli.py
-```
-
-Command shape:
+Or run individual checks:
 
 ```bash
-uv run python -m infrastructure.knowledge_sources.markdown.cli --kb-path sample_company_kb
+make lint
+make typecheck
+make test
 ```
 
-Goal: make ingestion runnable without starting the API.
+## Useful Development Commands
 
-Verify: run the command and print the ingestion report as JSON.
-
-### Step 6: Add Structure-Aware Chunking
-
-Add chunking as domain/application behavior before embeddings:
-
-```text
-domain/chunking/
-  schemas/model.py
-application/use_cases/chunking/
-  chunk_document.py
+```bash
+docker compose up -d qdrant
+docker compose ps
+docker compose stop qdrant
+uv run python -m app.cli.ingestion_pipeline
+uv run python -m app.cli.dense_search "vacation policy"
+make check
 ```
-
-Start simple:
-
-- split by Markdown headings
-- then paragraphs
-- target roughly 500 tokens or 2,000 characters
-- add small overlap only after the basic splitter works
-- preserve table text instead of splitting rows blindly
-
-Goal: turn one `SourceDocument` into many `KnowledgeChunk` objects.
-
-Verify: test headings, paragraphs, long sections, and tables.
-
-### Step 7: Add Local Identity Resolution
-
-Use local YAML instead of Jira:
-
-```text
-sample_company_kb/metadata/users.yaml
-domain/identity/
-infrastructure/identity/local_yaml/
-```
-
-Example:
-
-```yaml
-users:
-  alice@example.com:
-    groups:
-      - employees
-      - engineering
-  bob@example.com:
-    groups:
-      - employees
-      - hr
-```
-
-Goal: resolve trusted user email into groups.
-
-Verify: test known user, unknown user, and user with no groups.
-
-### Step 8: Add Permission Filtering In Plain Python
-
-Before Qdrant, prove ACL logic with normal Python functions.
-
-A chunk is visible if:
-
-- `allowed_users` contains the user email, or
-- `allowed_groups` intersects the user's groups.
-
-Goal: make permission behavior obvious before pushing filters into a vector DB.
-
-Verify: test employee-only, HR-only, user-specific, and inaccessible chunks.
-
-### Step 9: Add Embedding Provider Interface
-
-Add only the interface first:
-
-```text
-domain/llm/interfaces/
-  embedding_provider.py
-```
-
-It should expose something like:
-
-```python
-async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-    ...
-```
-
-Goal: keep the rest of the app independent from Bedrock/OpenAI/local models.
-
-Verify: test downstream code with a fake embedding provider that returns fixed vectors.
-
-### Step 10: Add A Real Embedding Provider
-
-Pick one provider for the first working version.
-
-Recommended for your target architecture:
-
-- Amazon Bedrock
-- Cohere Embed Multilingual v3
-
-Keep the provider in infrastructure:
-
-```text
-infrastructure/embeddings/
-  bedrock_cohere_provider.py
-```
-
-Goal: convert chunk text and query text into vectors.
-
-Verify: write provider-contract tests with a fake Bedrock client first, then run one manual real-provider call when credentials are configured.
-
-### Step 11: Add Qdrant Locally
-
-Add Qdrant to Docker Compose only when embeddings work.
-
-Then add:
-
-```text
-infrastructure/vector_store/qdrant/
-  client.py
-  collection.py
-  repository.py
-```
-
-Store each chunk with:
-
-- vector
-- chunk text
-- source metadata
-- ACL payload fields
-- `document_group_id`
-- `language`
-- `citation_url`
-
-Goal: persist chunks in a searchable vector collection.
-
-Verify: upsert a few chunks and retrieve them by ID before doing semantic search.
-
-### Step 12: Implement Dense Retrieval
-
-Add a retrieval use case:
-
-```text
-application/use_cases/retrieval/
-  search_knowledge.py
-```
-
-Flow:
-
-1. resolve user identity
-2. embed the query
-3. build permission filter
-4. search Qdrant
-5. return visible chunks only
-
-Goal: retrieve relevant chunks the user is allowed to see.
-
-Verify: ask the same query as `alice@example.com` and `bob@example.com`; HR-only content should only appear for HR users.
-
-### Step 13: Add Chat API Without LLM
-
-Before answer generation, expose retrieval through HTTP:
-
-```text
-entrypoints/http/routers/
-  chats.py
-```
-
-Start with an endpoint that returns retrieved chunks:
-
-```text
-POST /api/v1/chats/messages
-```
-
-Request:
-
-```json
-{
-  "user_email": "alice@example.com",
-  "message": "How many vacation days do I have?"
-}
-```
-
-Goal: prove API -> use case -> retrieval works before adding an LLM.
-
-Verify: write an HTTP test with fake retrieval.
-
-### Step 14: Add Chat Provider Interface
-
-Add only the interface first:
-
-```text
-domain/llm/interfaces/
-  chat_provider.py
-```
-
-It should accept a system prompt and user/context prompt, and return text.
-
-Goal: keep answer generation independent from provider details.
-
-Verify: test answer orchestration with a fake provider.
-
-### Step 15: Add Grounded Answer Generation
-
-Add an answer use case:
-
-```text
-application/use_cases/answering/
-  answer_from_context.py
-```
-
-The prompt must require:
-
-- answer only from retrieved context
-- decline when context is insufficient
-- cite only retrieved sources
-- treat retrieved text as untrusted data
-- answer in the user's language when practical
-
-Goal: transform retrieved chunks into a final answer with citations.
-
-Verify: test with a fake chat provider first; then manually test with the real provider.
-
-### Step 16: Add Real Chat Provider
-
-Recommended provider for your target architecture:
-
-- Amazon Bedrock Claude
-
-Keep it in infrastructure:
-
-```text
-infrastructure/llms/
-  bedrock_chat_provider.py
-```
-
-Goal: call the real model only after retrieval and prompting are testable.
-
-Verify: contract-test request/response parsing with a fake Bedrock client, then run one manual real-provider call.
-
-### Step 17: Add PostgreSQL Chat Memory
-
-Add database support after the request/response path works.
-
-Tables:
-
-- `chats`
-- `messages`
-
-Keep storage in:
-
-```text
-infrastructure/storage/postgres/
-```
-
-Goal: store conversations and load the last N messages for context.
-
-Verify: integration-test create chat, append message, list messages.
-
-### Step 18: Add Token Usage Tracking
-
-Add token/cost tracking once real LLM calls exist.
-
-Tables:
-
-- `message_token_usage`
-- later: `ingestion_run_token_usage`
-
-Goal: know which user/message/provider/model generated cost.
-
-Verify: fake provider returns fake usage; assert rows are written.
-
-### Step 19: Add Hybrid Search
-
-Only after dense retrieval works, add sparse search:
-
-- BM25 or Qdrant sparse vectors
-- RRF fusion
-
-Goal: improve exact-match retrieval for acronyms, names, and internal terms.
-
-Verify: create tests where dense search misses an exact internal keyword and sparse search finds it.
-
-### Step 20: Add Reranking
-
-After hybrid search works, add reranking:
-
-- Bedrock Cohere Rerank if available in your region
-- or a small LLM pointwise scorer
-
-Goal: improve top-K precision.
-
-Verify: use a fixed candidate set and assert reranking changes the order correctly.
-
-### Step 21: Add Contextual Enrichment
-
-Only after baseline retrieval is measurable, enrich chunks before embedding.
-
-Flow:
-
-1. send full document + chunk to a small model
-2. generate 1-2 sentence context
-3. prepend context before embedding
-4. keep original chunk text for answers
-
-Goal: improve retrieval without changing cited content.
-
-Verify: compare retrieval results before/after on a small question set.
-
-### Step 22: Add Image Processing
-
-Add this late because it increases cost and complexity.
-
-Flow:
-
-1. extract image references from Markdown
-2. describe images with a vision model
-3. cache descriptions
-4. insert descriptions into text before chunking
-
-Goal: make image information searchable.
-
-Verify: use one sample image and assert its description can be retrieved.
-
-### Step 23: Add Evaluation Tests
-
-Create a small evaluation set:
-
-```text
-evals/
-  hr_questions.yaml
-```
-
-Each case should include:
-
-- user email
-- question
-- expected source document
-- expected answer facts
-- should decline or answer
-
-Goal: measure quality before changing chunking, prompts, embeddings, or reranking.
-
-Verify: run evals locally and compare pass/fail counts.
-
-### Step 24: Add Streaming Later
-
-Keep the normal JSON endpoint as the primary API.
-
-Add SSE only after the synchronous path is stable:
-
-```text
-POST /api/v1/chats/messages/stream
-```
-
-Goal: improve UX without changing core answer logic.
-
-Verify: test event order and final payload shape.
-
-## Recommended Build Order
-
-Use this strict order:
-
-1. Sample Markdown KB
-2. Source document schema
-3. Markdown loader
-4. Ingestion report
-5. CLI
-6. Chunking
-7. Local identity resolver
-8. Plain Python ACL filter
-9. Fake embedding provider
-10. Real embedding provider
-11. Qdrant storage
-12. Dense retrieval
-13. HTTP retrieval endpoint
-14. Fake chat provider
-15. Grounded answer use case
-16. Real chat provider
-17. PostgreSQL chat memory
-18. Token usage tracking
-19. Hybrid search
-20. Reranking
-21. Contextual enrichment
-22. Image processing
-23. Evaluation harness
-24. SSE streaming
-
-At every step: write a small test, run it, and do not move to the next step until the current one works.

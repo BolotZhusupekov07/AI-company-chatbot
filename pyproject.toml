@@ -5,14 +5,18 @@ description = "Minimal company chatbot learning project scaffold"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "boto3>=1.43.12",
     "fastapi>=0.136.1",
     "pydantic-settings>=2.14.0",
     "pydantic>=2.13.3",
+    "qdrant-client>=1.18.0",
+    "pyyaml>=6.0.3",
     "uvicorn[standard]>=0.46.0",
 ]
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[bedrock-runtime]>=1.43.12",
     "httpx>=0.28.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
@@ -25,7 +29,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["application", "domain", "entrypoints", "infrastructure"]
+packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -48,5 +52,4 @@ select = ["E", "F", "I", "B", "UP", "RUF"]
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-sort-within-sections = true
-known-first-party = ["application", "domain", "entrypoints", "infrastructure"]
-
+known-first-party = ["app"]
