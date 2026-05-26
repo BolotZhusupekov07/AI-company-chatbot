@@ -1,26 +1,19 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 import json
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal
+
+import boto3
+
+if TYPE_CHECKING:
+    from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
 
 COHERE_EMBED_MULTILINGUAL_V3_MODEL_ID = "cohere.embed-multilingual-v3"
 DEFAULT_MAX_TEXTS_PER_REQUEST = 96
 
 CohereEmbedInputType = Literal["search_document", "search_query", "classification", "clustering"]
 CohereEmbedTruncate = Literal["NONE", "START", "END"]
-
-
-class BedrockRuntimeClient(Protocol):
-    """Minimal Bedrock Runtime client surface used by this provider."""
-
-    def invoke_model(
-        self,
-        *,
-        body: str,
-        modelId: str,
-        accept: str,
-        contentType: str,
-    ) -> Mapping[str, Any]:
-        """Invoke a Bedrock model."""
 
 
 class BedrockCohereEmbeddingError(RuntimeError):
@@ -94,11 +87,6 @@ class BedrockCohereEmbeddingProvider:
 
 
 def _build_bedrock_runtime_client(region_name: str | None) -> BedrockRuntimeClient:
-    try:
-        import boto3
-    except ImportError as error:  # pragma: no cover - exercised only in misconfigured runtime environments.
-        raise RuntimeError("boto3 is required when a Bedrock Runtime client is not injected") from error
-
     if region_name is None:
         return boto3.client("bedrock-runtime")
 

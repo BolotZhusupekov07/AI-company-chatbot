@@ -24,20 +24,24 @@ def _source_document(content_markdown: str) -> knowledge_model.SourceDocument:
 
 def test_chunk_document_preserves_source_metadata() -> None:
     document = _source_document("# Policy\n\nEmployees receive support.\n")
+    expected_content_markdown = "# Policy\n\nEmployees receive support."
+    expected_chunk = knowledge_model.KnowledgeChunk(
+        chunk_id="hr/policy.en.md:chunk:0001",
+        source_id=document.source_id,
+        document_group_id=document.document_group_id,
+        language=document.language,
+        space=document.space,
+        content_markdown=expected_content_markdown,
+        chunk_index=0,
+        character_count=len(expected_content_markdown),
+        content_hash=sha256(expected_content_markdown.encode("utf-8")).hexdigest(),
+        allowed_users=document.allowed_users,
+        allowed_groups=document.allowed_groups,
+    )
 
     chunks = MarkdownChunker(target_characters=300, overlap_characters=50, max_characters=400).chunk_document(document)
 
-    assert len(chunks) == 1
-    chunk = chunks[0]
-    assert chunk.chunk_id == "hr/policy.en.md:chunk:0001"
-    assert chunk.source_id == document.source_id
-    assert chunk.document_group_id == document.document_group_id
-    assert chunk.language == document.language
-    assert chunk.space == document.space
-    assert chunk.allowed_users == document.allowed_users
-    assert chunk.allowed_groups == document.allowed_groups
-    assert chunk.content_markdown == "# Policy\n\nEmployees receive support."
-    assert chunk.character_count == len(chunk.content_markdown)
+    assert chunks == [expected_chunk]
 
 
 def test_large_heading_section_does_not_cross_into_next_heading() -> None:

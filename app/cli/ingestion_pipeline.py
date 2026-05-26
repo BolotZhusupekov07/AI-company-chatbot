@@ -33,7 +33,7 @@ def main() -> None:
     # Store chunk embeddings in Qdrant vector store
     qdrant_client = build_qdrant_client(settings)
     qdrant_repo = QdrantVectorRepository(client=qdrant_client, collection_name=settings.QDRANT_COLLECTION_NAME)
-    qdrant_repo.ensure_collection(vector_size=1024)
+    qdrant_repo.ensure_collection(vector_size=settings.QDRANT_VECTOR_SIZE)
 
     qdrant_repo.upsert_chunks(all_chunks, chunk_embeddings)
 

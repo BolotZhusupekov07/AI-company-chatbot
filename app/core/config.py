@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6335"
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_NAME: str = "company_knowledge_chunks"
+    QDRANT_VECTOR_SIZE: int = 1024
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, extra="allow", frozen=True)
 
