@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.infrastructure.embeddings.bedrock_cohere_provider import BedrockCohereEmbeddingProvider
 from app.infrastructure.vector_store.qdrant.client import build_qdrant_client
 from app.infrastructure.vector_store.qdrant.repository import QdrantVectorRepository, build_acl_filter
+from app.services.identity_resolution_service import LocalIdentityResolver
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -12,6 +13,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     parser = ArgumentParser(description="Run dense search")
     parser.add_argument("query")
+    parser.add_argument("user_email")
 
     args = parser.parse_args(argv)
 
@@ -19,6 +21,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("query must not be blank")
 
     settings = get_settings()
+
+
+    identity_resolve_service = LocalIdentityResolver()
+    user = identity_resolve_service.resolve_user(args.user_email)
+    if not user:
+        print("User not found")
+        return
 
     embedding_provider = BedrockCohereEmbeddingProvider(region_name=settings.AWS_REGION_NAME)
     query_vector = embedding_provider.embed_query(args.query)
@@ -28,7 +37,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     results = qdrant_repo.search_dense(
         query_vector,
         limit=3,
-        query_filter=build_acl_filter("example@gmail.com", ["hr"]),
+        query_filter=build_acl_filter(user.email, user.groups),
         score_threshold=0.5,
     )
 

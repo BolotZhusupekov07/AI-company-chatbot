@@ -14,10 +14,10 @@ Markdown ingestion, structure-aware chunking, Bedrock Cohere embeddings, Qdrant 
 - Ingestion CLI that loads, chunks, embeds, and stores chunks in Qdrant.
 - Dense-search CLI that embeds a query and searches Qdrant.
 - Basic Qdrant ACL filter helper using `allowed_users` and `allowed_groups`.
+- Local YAML identity resolver using `sample_company_kb/metadata/users.yaml` and `groups.yaml`.
 
 Not implemented yet:
 
-- Trusted identity resolution from `sample_company_kb/metadata/users.yaml`.
 - HTTP chat or retrieval endpoint.
 - LLM answer generation.
 - Hybrid search, reranking, chat memory, evaluations, and streaming.
