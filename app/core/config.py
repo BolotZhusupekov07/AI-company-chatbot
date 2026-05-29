@@ -15,13 +15,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"] = "INFO"
     HOST: str = "127.0.0.1"
     PORT: int = 8000
-    DATABASE_URL: PostgresDsn = PostgresDsn("postgresql+psycopg://chatbot:chatbot@localhost:5432/ai_chatbot_company")
+    DATABASE_URL: PostgresDsn = PostgresDsn("postgresql+psycopg://chatbot:chatbot@localhost:5433/ai_chatbot_company")
 
     AWS_REGION_NAME: str = "eu-west-1"
     QDRANT_URL: str = "http://localhost:6335"
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_NAME: str = "company_knowledge_chunks"
     QDRANT_VECTOR_SIZE: int = 1024
+    CHAT_LLM_MODEL_ID: str = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+    CHAT_LLM_MAX_TOKENS: int = 1024
 
     model_config = SettingsConfigDict(env_file=ENV_PATH, extra="allow", frozen=True)
 

@@ -19,6 +19,7 @@ from app.api.v1.chats.schemas import (
     ChatUpdateRequest,
 )
 from app.core.enums import Role
+from app.services.chat_answer.service import ChatAnswerService
 from app.services.chat_service import ChatService
 
 router = APIRouter(tags=["Chats"])
@@ -73,19 +74,36 @@ async def create_chat_message(
     payload: ChatMessageCreateRequest,
     user_email: Annotated[EmailStr, Header(alias="X-User-Email", min_length=1)],
     service: Annotated[ChatService, Depends()],
+    answer_service: Annotated[ChatAnswerService, Depends()],
 ) -> ChatMessage:
-    """Create a user message, creating the chat first when needed."""
+    """Create a user message and return the retrieved answer message."""
 
     if payload.chat_id:
-        await service.ensure_chat_exists(payload.chat_id, user_email)
+        chat = await service.get_chat(payload.chat_id, user_email)
         chat_id = payload.chat_id
+        message_history = chat.messages
     else:
         chat_id = await service.create_chat(user_email)
+        message_history = []
 
-    return await service.create_message(
+    user_message = await service.create_message(
         ChatMessageCreate(
             chat_id=chat_id,
             content=payload.content,
             role=Role.USER,
+        )
+    )
+
+    answer = await answer_service.answer(
+        question=payload.content,
+        user_email=str(user_email),
+        message_history=message_history,
+    )
+    return await service.create_message(
+        ChatMessageCreate(
+            chat_id=chat_id,
+            content=answer,
+            role=Role.AGENT,
+            message_id=user_message.id,
         )
     )

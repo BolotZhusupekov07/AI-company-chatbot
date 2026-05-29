@@ -107,7 +107,8 @@ Important config values:
 
 ```env
 AWS_REGION_NAME=eu-central-1
-DATABASE_URL=postgresql+psycopg://chatbot:chatbot@localhost:5432/ai_chatbot_company
+DATABASE_URL=postgresql+psycopg://chatbot:chatbot@localhost:5433/ai_chatbot_company
+CHAT_LLM_MODEL_ID=eu.anthropic.claude-haiku-4-5-20251001-v1:0
 QDRANT_URL=http://localhost:6335
 QDRANT_API_KEY=
 QDRANT_COLLECTION_NAME=company_knowledge_chunks
@@ -121,7 +122,7 @@ docker compose up -d postgres qdrant
 
 The included compose file maps:
 
-- host `5432` to PostgreSQL port `5432`
+- host `5433` to PostgreSQL port `5432`
 - host `6335` to Qdrant HTTP port `6333`
 - host `6336` to Qdrant gRPC port `6334`
 

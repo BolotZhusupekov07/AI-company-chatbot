@@ -12,8 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.infrastructure.db.database import Base, get_session
 import app.infrastructure.db.models.chat
 from app.main import create_app
+from app.services.chat_answer.service import ChatAnswerService
 
 TEST_HOST = "http://test"
+
+
+class StubChatAnswerService:
+    """Test double for chat answer generation."""
+
+    def __init__(self) -> None:
+        self.response = "Retrieved answer"
+        self.calls: list[dict[str, object]] = []
+
+    async def answer(self, *, question: str, user_email: str, message_history: object) -> str:
+        self.calls.append(
+            {
+                "question": question,
+                "user_email": user_email,
+                "message_history": message_history,
+            }
+        )
+        return self.response
 
 
 @pytest.fixture
@@ -40,12 +59,16 @@ async def app(engine: AsyncEngine) -> AsyncGenerator[FastAPI, Any]:
     transaction = await connection.begin()
     session_factory = async_sessionmaker(connection, expire_on_commit=False)
     session = session_factory()
+    answer_service = StubChatAnswerService()
+    test_app.state.answer_service = answer_service
     test_app.dependency_overrides[get_session] = lambda: session
+    test_app.dependency_overrides[ChatAnswerService] = lambda: answer_service
 
     try:
         yield test_app
     finally:
         test_app.dependency_overrides.pop(get_session, None)
+        test_app.dependency_overrides.pop(ChatAnswerService, None)
         await transaction.rollback()
         await session.close()
         await connection.close()
@@ -64,3 +87,10 @@ async def session(app: FastAPI) -> AsyncSession:
     """Return the app's overridden database session."""
 
     return app.dependency_overrides[get_session]()
+
+
+@pytest.fixture
+def answer_service(app: FastAPI) -> StubChatAnswerService:
+    """Return the app's overridden chat answer service."""
+
+    return app.state.answer_service

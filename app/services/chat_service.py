@@ -51,6 +51,7 @@ class ChatService:
     async def create_message(self, schema: ChatMessageCreate) -> ChatMessage:
         """Create a chat message."""
 
+        now = datetime.now(UTC)
         query = (
             insert(ChatMessageModel)
             .values(
@@ -60,6 +61,8 @@ class ChatService:
                 role=schema.role,
                 language=schema.language,
                 processing_time_ms=0,
+                created_at=now,
+                updated_at=now,
             )
             .returning(ChatMessageModel)
         )

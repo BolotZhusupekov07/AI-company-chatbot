@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.chats.schemas import ChatListItem, ChatMessageCreate
 from app.core.enums import Language, Role
 from app.infrastructure.db.models.chat import ChatModel
+from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_service import ChatService
+from tests.conftest import StubChatAnswerService
 
 
 async def create_test_chat(
@@ -230,12 +232,14 @@ class TestDeleteChat:
 class TestCreateChatMessage:
     """POST /v1/chats/messages."""
 
-    async def test_creates_chat_and_user_message_when_chat_id_is_not_provided(
+    async def test_creates_chat_user_message_and_agent_answer_when_chat_id_is_not_provided(
         self,
         session: AsyncSession,
         client: AsyncClient,
+        answer_service: StubChatAnswerService,
     ) -> None:
         user_email = f"new-user-{uuid4()}@example.com"
+        answer_service.response = "Employees receive 20 paid vacation days per year."
 
         response = await client.post(
             "/v1/chats/messages",
@@ -250,8 +254,8 @@ class TestCreateChatMessage:
         assert response_data == {
             "id": str(message_id),
             "chatId": str(chat_id),
-            "role": Role.USER,
-            "content": "What is our vacation policy?",
+            "role": Role.AGENT,
+            "content": "Employees receive 20 paid vacation days per year.",
             "language": Language.RU,
             "createdAt": response_data["createdAt"],
             "updatedAt": response_data["updatedAt"],
@@ -260,18 +264,43 @@ class TestCreateChatMessage:
         service = ChatService(session)
         chat = await service.get_chat(chat_id)
         assert chat.user_email == user_email
-        assert len(chat.messages) == 1
-        assert chat.messages[0].id == message_id
-        assert chat.messages[0].role == Role.USER
+        assert [message.role for message in chat.messages] == [Role.USER, Role.AGENT]
+        assert chat.messages[0].content == "What is our vacation policy?"
+        assert chat.messages[1].id == message_id
+        assert chat.messages[1].content == "Employees receive 20 paid vacation days per year."
+        assert answer_service.calls == [
+            {
+                "question": "What is our vacation policy?",
+                "user_email": user_email,
+                "message_history": [],
+            }
+        ]
 
-    async def test_adds_user_message_to_existing_chat(
+    async def test_adds_user_message_and_agent_answer_to_existing_chat(
         self,
         session: AsyncSession,
         client: AsyncClient,
+        answer_service: StubChatAnswerService,
     ) -> None:
         service = ChatService(session)
         user_email = f"existing-user-{uuid4()}@example.com"
         chat_id = await service.create_chat(user_email)
+        previous_user_message = await service.create_message(
+            ChatMessageCreate(
+                chat_id=chat_id,
+                content="Earlier question",
+                role=Role.USER,
+            )
+        )
+        previous_agent_message = await service.create_message(
+            ChatMessageCreate(
+                chat_id=chat_id,
+                content="Earlier answer",
+                role=Role.AGENT,
+                message_id=previous_user_message.id,
+            )
+        )
+        answer_service.response = "Sick leave starts by notifying your manager."
 
         response = await client.post(
             "/v1/chats/messages",
@@ -282,11 +311,15 @@ class TestCreateChatMessage:
         assert response.status_code == 201
         response_data = response.json()
         assert response_data["chatId"] == str(chat_id)
-        assert response_data["role"] == Role.USER
-        assert response_data["content"] == "Tell me about sick leave."
+        assert response_data["role"] == Role.AGENT
+        assert response_data["content"] == "Sick leave starts by notifying your manager."
 
         chats_count = await session.scalar(select(func.count()).select_from(ChatModel).where(ChatModel.id == chat_id))
         assert chats_count == 1
+        assert answer_service.calls[0]["message_history"] == [
+            previous_user_message,
+            previous_agent_message,
+        ]
 
     async def test_returns_not_found_when_existing_chat_belongs_to_another_user(
         self,
@@ -304,3 +337,29 @@ class TestCreateChatMessage:
 
         assert response.status_code == 404
         assert response.json() == {"detail": f"Chat(id={chat_id}) not found"}
+
+    async def test_returns_fallback_agent_message_when_answer_is_not_found(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+        answer_service: StubChatAnswerService,
+    ) -> None:
+        user_email = f"fallback-user-{uuid4()}@example.com"
+        answer_service.response = CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+        response = await client.post(
+            "/v1/chats/messages",
+            headers={"X-User-Email": user_email},
+            json={"content": "Unknown policy question."},
+        )
+
+        assert response.status_code == 201
+        response_data = response.json()
+        chat_id = UUID(response_data["chatId"])
+        assert response_data["role"] == Role.AGENT
+        assert response_data["content"] == CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+        service = ChatService(session)
+        chat = await service.get_chat(chat_id)
+        assert [message.role for message in chat.messages] == [Role.USER, Role.AGENT]
+        assert chat.messages[1].content == CHAT_ANSWER_NOT_FOUND_MESSAGE

@@ -6,9 +6,9 @@ services:
       POSTGRES_USER: chatbot
       POSTGRES_PASSWORD: chatbot
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
 
   qdrant:
     image: qdrant/qdrant:v1.15.5
