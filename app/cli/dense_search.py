@@ -22,7 +22,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     settings = get_settings()
 
-
     identity_resolve_service = LocalIdentityResolver()
     user = identity_resolve_service.resolve_user(args.user_email)
     if not user:

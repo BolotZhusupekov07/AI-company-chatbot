@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PATH = "./config/.env"
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"] = "INFO"
     HOST: str = "127.0.0.1"
     PORT: int = 8000
+    DATABASE_URL: PostgresDsn = PostgresDsn("postgresql+psycopg://chatbot:chatbot@localhost:5432/ai_chatbot_company")
 
     AWS_REGION_NAME: str = "eu-west-1"
     QDRANT_URL: str = "http://localhost:6335"

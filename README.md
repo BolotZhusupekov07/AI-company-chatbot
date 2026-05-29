@@ -15,10 +15,10 @@ Markdown ingestion, structure-aware chunking, Bedrock Cohere embeddings, Qdrant 
 - Dense-search CLI that embeds a query and searches Qdrant.
 - Basic Qdrant ACL filter helper using `allowed_users` and `allowed_groups`.
 - Local YAML identity resolver using `sample_company_kb/metadata/users.yaml` and `groups.yaml`.
+- HTTP chat API backed by PostgreSQL chats and chat messages.
 
 Not implemented yet:
 
-- HTTP chat or retrieval endpoint.
 - LLM answer generation.
 - Hybrid search, reranking, chat memory, evaluations, and streaming.
 
@@ -69,6 +69,7 @@ app/core/                           settings and core wiring
 app/services/                       application services such as chunking
 app/infrastructure/embeddings/      Bedrock Cohere embedding adapter
 app/infrastructure/knowledge_sources/ Markdown source loader
+app/infrastructure/db/              SQLAlchemy database session and models
 app/infrastructure/vector_store/    Qdrant vector store adapter
 app/knowledge/                      internal knowledge schemas
 app/cli/                            CLI scripts
@@ -82,7 +83,7 @@ docs/learning-roadmap.md            implementation roadmap
 
 - Python 3.13 or newer.
 - `uv`.
-- Docker, for local Qdrant.
+- Docker, for local PostgreSQL and Qdrant.
 - AWS credentials with access to Bedrock Cohere Embed Multilingual v3.
 
 The app uses normal `boto3` credential discovery. Configure credentials through your AWS profile, environment variables,
@@ -106,21 +107,29 @@ Important config values:
 
 ```env
 AWS_REGION_NAME=eu-central-1
+DATABASE_URL=postgresql+psycopg://chatbot:chatbot@localhost:5432/ai_chatbot_company
 QDRANT_URL=http://localhost:6335
 QDRANT_API_KEY=
 QDRANT_COLLECTION_NAME=company_knowledge_chunks
 ```
 
-Start Qdrant:
+Start PostgreSQL and Qdrant:
 
 ```bash
-docker compose up -d qdrant
+docker compose up -d postgres qdrant
 ```
 
 The included compose file maps:
 
+- host `5432` to PostgreSQL port `5432`
 - host `6335` to Qdrant HTTP port `6333`
 - host `6336` to Qdrant gRPC port `6334`
+
+Run migrations:
+
+```bash
+uv run alembic upgrade head
+```
 
 Check Qdrant:
 
@@ -139,7 +148,7 @@ API docs:
 - http://localhost:8000/docs
 - http://localhost:8000/redoc
 
-Health checks are available through the FastAPI app. Chat and retrieval HTTP endpoints are not implemented yet.
+Health checks and chat endpoints are available through the FastAPI app.
 
 ## Run CLI Scripts
 
@@ -200,8 +209,10 @@ make test
 
 ```bash
 docker compose up -d qdrant
+docker compose up -d postgres
 docker compose ps
-docker compose stop qdrant
+docker compose stop postgres qdrant
+uv run alembic upgrade head
 uv run python -m app.cli.ingestion_pipeline
 uv run python -m app.cli.dense_search "vacation policy"
 make check
