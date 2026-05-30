@@ -5,7 +5,7 @@ from app.services.chat_answer.dependencies import ChatAgentDeps
 
 
 def search_company_knowledge_tool(deps: ChatAgentDeps, *, query: str) -> str:
-    """Run ACL-aware hybrid search and return the best result text."""
+    """Run ACL-aware hybrid search for company-specific questions and return the best result text."""
 
     user = deps.identity_resolver.resolve_user(deps.user_email)
     if user is None:

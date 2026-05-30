@@ -24,7 +24,7 @@ def build_chat_agent(model: BedrockConverseModel) -> Agent[ChatAgentDeps, str]:
 
     @agent.tool
     def search_company_knowledge(ctx: RunContext[ChatAgentDeps], query: str) -> str:
-        """Search company knowledge and return the first matching chunk text."""
+        """Search company knowledge for company-specific facts, policies, processes, access, or internal systems."""
 
         return search_company_knowledge_tool(ctx.deps, query=query)
 
