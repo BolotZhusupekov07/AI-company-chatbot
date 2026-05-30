@@ -1,6 +1,7 @@
-from dataclasses import dataclass
 from hashlib import sha256
 import re
+
+from pydantic import BaseModel, ConfigDict
 
 from app.knowledge.schemas import model as knowledge_model
 
@@ -14,20 +15,23 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r":?-{3,}:?")
 
 
-@dataclass(frozen=True)
-class _Block:
+class _Block(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: str
     text: str
 
 
-@dataclass(frozen=True)
-class _Section:
+class _Section(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     headings: list[str]
     blocks: list[_Block]
 
 
-@dataclass(frozen=True)
-class _ChunkCandidate:
+class _ChunkCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     text: str
     can_combine: bool
 

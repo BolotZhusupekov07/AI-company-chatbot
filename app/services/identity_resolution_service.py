@@ -1,7 +1,7 @@
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
 import yaml
 
 
@@ -9,9 +9,10 @@ class IdentityMetadataError(ValueError):
     """Raised when local identity metadata is malformed."""
 
 
-@dataclass(frozen=True)
-class ResolvedIdentity:
+class ResolvedIdentity(BaseModel):
     """Trusted local identity resolved from sample company metadata."""
+
+    model_config = ConfigDict(frozen=True)
 
     email: str
     full_name: str
@@ -47,8 +48,9 @@ class LocalIdentityResolver:
         )
 
 
-@dataclass(frozen=True)
-class _LocalUser:
+class _LocalUser(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     full_name: str
     location: str
     department: str

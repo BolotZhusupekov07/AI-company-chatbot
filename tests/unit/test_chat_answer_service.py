@@ -1,11 +1,10 @@
 """Chat answer service tests."""
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 import pytest
@@ -13,25 +12,17 @@ import pytest
 from app.api.v1.chats.schemas import ChatMessage
 from app.core.config import Settings
 from app.core.enums import Language, Role
-from app.infrastructure.embeddings.bedrock_cohere_provider import BedrockCohereEmbeddingProvider
-from app.infrastructure.vector_store.qdrant.repository import (
-    QdrantChunkPayload,
-    QdrantChunkSearchResult,
-    QdrantVectorRepository,
-)
+from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload
 from app.services.chat_answer import service as chat_answer_service
-from app.services.chat_answer.constants import (
-    CHAT_ANSWER_NOT_FOUND_MESSAGE,
-    CHAT_ANSWER_SCORE_THRESHOLD,
-)
+from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.service import ChatAnswerService
 from app.services.chat_answer.tools import search_company_knowledge_tool
+from app.services.hybrid_search_service import HybridSearchResult, HybridSearchService
 from app.services.identity_resolution_service import LocalIdentityResolver, ResolvedIdentity
 
 
-@dataclass
-class FakeAgentResult:
+class FakeAgentResult(BaseModel):
     output: str
 
 
@@ -42,7 +33,7 @@ class FakeAgent:
 
     async def run(self, user_prompt: str, **kwargs: Any) -> FakeAgentResult:
         self.calls.append({"user_prompt": user_prompt, **kwargs})
-        return FakeAgentResult(self.output)
+        return FakeAgentResult(output=self.output)
 
 
 @pytest.mark.asyncio
@@ -52,6 +43,8 @@ async def test_answer_calls_agent_with_message_history_and_model_settings(monkey
     monkeypatch.setattr(chat_answer_service, "build_qdrant_client", lambda settings: object())
     monkeypatch.setattr(chat_answer_service, "BedrockCohereEmbeddingProvider", lambda region_name: object())
     monkeypatch.setattr(chat_answer_service, "QdrantVectorRepository", lambda **kwargs: object())
+    monkeypatch.setattr(chat_answer_service, "BedrockCohereRerankProvider", lambda **kwargs: object())
+    monkeypatch.setattr(chat_answer_service, "HybridSearchService", lambda **kwargs: object())
     service = ChatAnswerService(settings, cast(Agent[ChatAgentDeps, str], agent))
 
     history_messages = [
@@ -80,7 +73,7 @@ async def test_answer_calls_agent_with_message_history_and_model_settings(monkey
     assert call["model_settings"]["max_tokens"] == 321
 
 
-def test_search_company_knowledge_tool_returns_first_dense_search_result() -> None:
+def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> None:
     class FakeIdentityResolver:
         def resolve_user(self, email: str) -> ResolvedIdentity:
             return ResolvedIdentity(
@@ -91,19 +84,20 @@ def test_search_company_knowledge_tool_returns_first_dense_search_result() -> No
                 groups=["employees"],
             )
 
-    class FakeEmbeddingProvider:
-        def embed_query(self, query_text: str) -> list[float]:
-            assert query_text == "vacation policy"
-            return [0.1, 0.2]
-
-    class FakeQdrantRepository:
+    class FakeHybridSearchService:
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
 
-        def search_dense(self, query_vector: Sequence[float], **kwargs: Any) -> list[QdrantChunkSearchResult]:
-            self.calls.append({"query_vector": query_vector, **kwargs})
+        def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
+            self.calls.append(
+                {
+                    "query": query,
+                    "user_email": user_email,
+                    "user_groups": user_groups,
+                }
+            )
             return [
-                QdrantChunkSearchResult(
+                HybridSearchResult(
                     payload=QdrantChunkPayload(
                         chunk_id="chunk-1",
                         source_id="source-1",
@@ -116,25 +110,29 @@ def test_search_company_knowledge_tool_returns_first_dense_search_result() -> No
                         chunk_index=0,
                         character_count=22,
                     ),
-                    score=0.92,
+                    rrf_score=0.2,
+                    rerank_score=0.95,
+                    rerank_provider="bedrock-cohere",
                 )
             ]
 
-    qdrant_repo = FakeQdrantRepository()
+    hybrid_search_service = FakeHybridSearchService()
     deps = ChatAgentDeps(
         user_email="AIDA@example.com",
         identity_resolver=cast(LocalIdentityResolver, FakeIdentityResolver()),
-        embedding_provider=cast(BedrockCohereEmbeddingProvider, FakeEmbeddingProvider()),
-        qdrant_repo=cast(QdrantVectorRepository, qdrant_repo),
+        hybrid_search_service=cast(HybridSearchService, hybrid_search_service),
     )
 
     answer = search_company_knowledge_tool(deps, query="vacation policy")
 
     assert answer == "Vacation policy answer"
-    assert qdrant_repo.calls[0]["query_vector"] == [0.1, 0.2]
-    assert qdrant_repo.calls[0]["limit"] == 1
-    assert qdrant_repo.calls[0]["score_threshold"] == CHAT_ANSWER_SCORE_THRESHOLD
-    assert qdrant_repo.calls[0]["query_filter"] is not None
+    assert hybrid_search_service.calls == [
+        {
+            "query": "vacation policy",
+            "user_email": "aida@example.com",
+            "user_groups": ["employees"],
+        }
+    ]
 
 
 def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> None:
@@ -142,19 +140,14 @@ def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> No
         def resolve_user(self, email: str) -> None:
             return None
 
-    class UnexpectedEmbeddingProvider:
-        def embed_query(self, query_text: str) -> list[float]:
-            raise AssertionError("embedding provider should not be called")
-
-    class UnexpectedQdrantRepository:
-        def search_dense(self, query_vector: Sequence[float], **kwargs: Any) -> list[QdrantChunkSearchResult]:
-            raise AssertionError("qdrant repository should not be called")
+    class UnexpectedHybridSearchService:
+        def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
+            raise AssertionError("hybrid search service should not be called")
 
     deps = ChatAgentDeps(
         user_email="unknown@example.com",
         identity_resolver=cast(LocalIdentityResolver, FakeIdentityResolver()),
-        embedding_provider=cast(BedrockCohereEmbeddingProvider, UnexpectedEmbeddingProvider()),
-        qdrant_repo=cast(QdrantVectorRepository, UnexpectedQdrantRepository()),
+        hybrid_search_service=cast(HybridSearchService, UnexpectedHybridSearchService()),
     )
 
     assert search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE

@@ -96,7 +96,7 @@ async def create_chat_message(
 
     answer = await answer_service.answer(
         question=payload.content,
-        user_email=str(user_email),
+        user_email=user_email,
         message_history=message_history,
     )
     return await service.create_message(
