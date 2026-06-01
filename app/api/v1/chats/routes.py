@@ -87,11 +87,7 @@ async def create_chat_message(
         message_history = []
 
     user_message = await service.create_message(
-        ChatMessageCreate(
-            chat_id=chat_id,
-            content=payload.content,
-            role=Role.USER,
-        )
+        ChatMessageCreate(chat_id=chat_id, content=payload.content, role=Role.USER)
     )
 
     answer = await answer_service.answer(
@@ -100,10 +96,5 @@ async def create_chat_message(
         message_history=message_history,
     )
     return await service.create_message(
-        ChatMessageCreate(
-            chat_id=chat_id,
-            content=answer,
-            role=Role.AGENT,
-            message_id=user_message.id,
-        )
+        ChatMessageCreate(chat_id=chat_id, content=answer, role=Role.AGENT, message_id=user_message.id)
     )

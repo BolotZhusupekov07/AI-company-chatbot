@@ -6,7 +6,7 @@ from fastapi import Depends
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.bedrock import BedrockConverseModel
 
-from app.infrastructure.llms.bedrock import get_chat_bedrock_model
+from app.services.chat_answer.bedrock.model import get_chat_bedrock_model
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.prompts import CHAT_AGENT_INSTRUCTIONS
 from app.services.chat_answer.schemas import ChatAgentOutput
@@ -24,10 +24,10 @@ def build_chat_agent(model: BedrockConverseModel) -> Agent[ChatAgentDeps, ChatAg
     )
 
     @agent.tool
-    def search_company_knowledge(ctx: RunContext[ChatAgentDeps], query: str) -> str:
+    async def search_company_knowledge(ctx: RunContext[ChatAgentDeps], query: str) -> str:
         """Search company knowledge for company-specific facts, policies, processes, access, or internal systems."""
 
-        return search_company_knowledge_tool(ctx.deps, query=query)
+        return await search_company_knowledge_tool(ctx.deps, query=query)
 
     return agent
 

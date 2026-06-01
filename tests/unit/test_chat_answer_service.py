@@ -46,11 +46,7 @@ async def test_answer_calls_agent_with_message_history_and_model_settings(monkey
         )
     )
     settings = Settings(CHAT_LLM_MAX_TOKENS=321)
-    monkeypatch.setattr(chat_answer_service, "build_qdrant_client", lambda settings: object())
-    monkeypatch.setattr(chat_answer_service, "BedrockCohereEmbeddingProvider", lambda region_name: object())
-    monkeypatch.setattr(chat_answer_service, "QdrantVectorRepository", lambda **kwargs: object())
-    monkeypatch.setattr(chat_answer_service, "BedrockCohereRerankProvider", lambda **kwargs: object())
-    monkeypatch.setattr(chat_answer_service, "HybridSearchService", lambda **kwargs: object())
+    monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
     agent_dependency: Any = agent
     service = ChatAnswerService(settings, agent_dependency)
 
@@ -78,9 +74,34 @@ async def test_answer_calls_agent_with_message_history_and_model_settings(monkey
     assert message_history[1].parts[0].content == "Earlier answer"
     assert call["model_settings"]["temperature"] == 0.0
     assert call["model_settings"]["max_tokens"] == 321
+    assert call["model_settings"]["bedrock_cache_instructions"] is True
 
 
-def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> None:
+@pytest.mark.asyncio
+async def test_answer_appends_sources_from_agent_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = FakeAgent(
+        ChatAgentOutput(
+            answer="Employees receive 20 paid vacation days per year.",
+            used_rag=True,
+            confidence=0.9,
+            sources=["hr/vacation-policy.en.md", "hr/vacation-policy.en.md"],
+        )
+    )
+    monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
+    agent_dependency: Any = agent
+    service = ChatAnswerService(Settings(), agent_dependency)
+
+    answer = await service.answer(
+        question="Vacation policy?",
+        user_email="aida@example.com",
+        message_history=[],
+    )
+
+    assert answer == "Employees receive 20 paid vacation days per year.\n\nSources: hr/vacation-policy.en.md"
+
+
+@pytest.mark.asyncio
+async def test_search_company_knowledge_tool_returns_grounded_source_excerpt() -> None:
     class FakeIdentityResolver:
         def resolve_user(self, email: str) -> ResolvedIdentity:
             return ResolvedIdentity(
@@ -95,7 +116,7 @@ def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> N
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
 
-        def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
+        async def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
             self.calls.append(
                 {
                     "query": query,
@@ -132,9 +153,9 @@ def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> N
         hybrid_search_service=hybrid_search_dependency,
     )
 
-    answer = search_company_knowledge_tool(deps, query="vacation policy")
+    answer = await search_company_knowledge_tool(deps, query="vacation policy")
 
-    assert answer == "Vacation policy answer"
+    assert answer == "Content: Vacation policy answer\n\nSource ID: source-1"
     assert hybrid_search_service.calls == [
         {
             "query": "vacation policy",
@@ -144,13 +165,14 @@ def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> N
     ]
 
 
-def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> None:
+@pytest.mark.asyncio
+async def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> None:
     class FakeIdentityResolver:
         def resolve_user(self, email: str) -> None:
             return None
 
     class UnexpectedHybridSearchService:
-        def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
+        async def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
             raise AssertionError("hybrid search service should not be called")
 
     identity_resolver: Any = FakeIdentityResolver()
@@ -161,7 +183,17 @@ def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> No
         hybrid_search_service=hybrid_search_service,
     )
 
-    assert search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE
+    assert await search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+
+def _chat_agent_deps(user_email: str, settings: Settings) -> ChatAgentDeps:
+    identity_resolver: Any = object()
+    hybrid_search_service: Any = object()
+    return ChatAgentDeps(
+        user_email=user_email,
+        identity_resolver=identity_resolver,
+        hybrid_search_service=hybrid_search_service,
+    )
 
 
 def _chat_message(*, index: int, role: Role, content: str) -> ChatMessage:

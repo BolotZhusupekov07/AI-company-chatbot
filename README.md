@@ -10,7 +10,7 @@ reranking, PostgreSQL chat persistence, and a retrieval-backed Bedrock chat API.
 - Versioned chat API for listing, reading, updating, soft-deleting, and creating chat messages.
 - PostgreSQL chat and chat-message persistence with SQLAlchemy models and Alembic migrations.
 - Chat-answer service using Pydantic AI with Bedrock Converse.
-- Structured agent output with `answer`, `used_rag`, and `confidence`.
+- Structured agent output with `answer`, `used_rag`, `confidence`, and `sources`.
 - Message history passed into the chat model for follow-up answers.
 - Company knowledge search tool that runs ACL-aware hybrid retrieval before answering.
 - Sample company knowledge base in `sample_company_kb/`.
@@ -20,7 +20,7 @@ reranking, PostgreSQL chat persistence, and a retrieval-backed Bedrock chat API.
 - Local Qdrant vector store integration with dense and BM25 sparse vectors.
 - Ingestion CLI that loads, chunks, embeds, and stores dense plus sparse chunk vectors in Qdrant.
 - Hybrid search service that asks Qdrant to fuse dense vector search and BM25 sparse search with RRF, then reranks candidates.
-- Bedrock Cohere reranker with an OpenAI fallback reranker.
+- Bedrock Cohere reranker with a Pydantic AI OpenAI fallback reranker.
 - Basic Qdrant ACL filter helper using `allowed_users` and `allowed_groups`.
 - Local YAML identity resolver using `sample_company_kb/metadata/users.yaml` and `groups.yaml`.
 
@@ -31,10 +31,10 @@ Not implemented yet:
   validator, retry on invalid answer contracts, or fallback provider when model output fails validation.
 - Query rewrite agent. RAG embeds the user query directly; there is no native-language query rewrite agent or conditional
   English-translated fallback query pass.
-- Document-group deduplication. Reranked chunks are returned as-is, without deduplication by `document_group_id`,
-  language-preference tie-breaks, or citation target selection.
-- Grounded answer citations. The RAG tool returns only the best chunk text, without source IDs, page URLs, chunk IDs,
-  document summaries, citation metadata, or verified citation targets.
+- Document-group deduplication. Reranked chunks are returned as-is, without deduplication by `document_group_id` or
+  language-preference tie-breaks.
+- Citation verification. The RAG tool returns local source IDs and chunk IDs for grounding, but there is no separate
+  citation verifier, document summary layer, or external page URL mapping.
 - Prompt-injection hardening around retrieved content. Retrieved text is not wrapped in explicit untrusted-content
   delimiters, and there is no citation verification or post-check.
 - Token usage and cost attribution. There are no token-usage tables or per-call usage captures for chat, RAG, rerank,
@@ -70,8 +70,8 @@ user query
      -> Qdrant prefetch: BM25 sparse search with ACL + source-language filters
      -> Qdrant RRF fusion
   -> Bedrock Cohere Rerank 3.5
-     -> OpenAI fallback with smaller candidate budget when Bedrock rerank is unavailable
-  -> reranked chunk payloads
+     -> OpenAI fallback agent with a smaller candidate budget when Bedrock rerank is unavailable
+  -> reranked chunk payloads, or the original RRF order when both rerankers are unavailable
 ```
 
 Chat answering works like this:
@@ -106,7 +106,7 @@ Qdrant payloads store:
 app/main.py                         FastAPI app factory and local run entrypoint
 app/api/                            HTTP routers and schemas
 app/core/                           settings and core wiring
-app/services/                       application services such as chunking
+app/services/                       application services such as chunking, chat answering, and reranking
 app/infrastructure/embeddings/      Bedrock Cohere embedding adapter
 app/infrastructure/knowledge_sources/ Markdown source loader
 app/infrastructure/db/              SQLAlchemy database session and models
@@ -236,7 +236,7 @@ The chat answer path uses:
 - Sparse branch: Qdrant BM25 over chunks in `KNOWLEDGE_SOURCE_LANGUAGE` with the same ACL filter.
 - Fusion: Qdrant native Reciprocal Rank Fusion with `HYBRID_RRF_K`.
 - Rerank: Bedrock Cohere Rerank 3.5 first, OpenAI fallback over `OPENAI_RERANK_CANDIDATE_LIMIT` candidates.
-- Final answer: Bedrock Converse chat model with retrieved company knowledge as a tool result.
+- Final answer: Bedrock Converse chat model with retrieved company knowledge and local source IDs as a tool result.
 
 If you already have a dense-only Qdrant collection from an older run, delete or rename it before re-ingesting because
 the hybrid collection needs the named `dense` vector and the `sparse` BM25 vector field.

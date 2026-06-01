@@ -1,11 +1,11 @@
-"""Bedrock LLM model wiring."""
+"""Bedrock LLM model wiring for chat answers."""
 
 from functools import lru_cache
 from typing import Annotated
 
 import boto3
 from fastapi import Depends
-from pydantic_ai.models.bedrock import BedrockConverseModel
+from pydantic_ai.models.bedrock import BedrockConverseModel, BedrockModelSettings
 from pydantic_ai.providers.bedrock import BedrockProvider
 
 from app.core.config import Settings, get_settings
@@ -29,3 +29,13 @@ def get_chat_bedrock_model(settings: Annotated[Settings, Depends(get_settings)])
         model_id=settings.CHAT_LLM_MODEL_ID,
         region_name=settings.AWS_REGION_NAME,
     )
+
+
+def build_bedrock_converse_model_settings(max_tokens: int | None = None) -> BedrockModelSettings:
+    model_settings = BedrockModelSettings(
+        temperature=0.0,
+        bedrock_cache_instructions=True,
+    )
+    if max_tokens is not None:
+        model_settings["max_tokens"] = max_tokens
+    return model_settings

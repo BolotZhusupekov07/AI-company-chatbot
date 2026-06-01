@@ -5,15 +5,15 @@ from collections.abc import Sequence
 from pydantic import BaseModel, ConfigDict
 
 from app.infrastructure.embeddings.bedrock_cohere_provider import BedrockCohereEmbeddingProvider
-from app.infrastructure.rerankers.exceptions import RemoteRerankError
-from app.infrastructure.rerankers.interface import RemoteReranker
-from app.infrastructure.rerankers.schemas import RerankRequest, RerankScore
 from app.infrastructure.vector_store.qdrant.repository import (
     QdrantVectorRepository,
     build_acl_filter,
     build_acl_language_filter,
 )
 from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload, QdrantHybridSearchRequest
+from app.services.rerank.exceptions import RemoteRerankError
+from app.services.rerank.interface import RemoteReranker
+from app.services.rerank.schemas import RerankRequest, RerankScore
 
 
 class HybridSearchResult(BaseModel):
@@ -53,7 +53,7 @@ class HybridSearchService:
         self._secondary_rerank_limit = secondary_rerank_limit
         self._top_k = top_k
 
-    def search(self, *, query: str, user_email: str, user_groups: Sequence[str]) -> list[HybridSearchResult]:
+    async def search(self, *, query: str, user_email: str, user_groups: Sequence[str]) -> list[HybridSearchResult]:
         """Return the best chunks for a query after hybrid retrieval and reranking."""
 
         query_text = query.strip()
@@ -80,14 +80,15 @@ class HybridSearchService:
         if not fused:
             return []
 
-        return self._rerank(query=query_text, candidates=fused)[: self._top_k]
+        reranked = await self._rerank(query=query_text, candidates=fused)
+        return reranked[: self._top_k]
 
-    def _rerank(self, *, query: str, candidates: Sequence[HybridSearchResult]) -> list[HybridSearchResult]:
+    async def _rerank(self, *, query: str, candidates: Sequence[HybridSearchResult]) -> list[HybridSearchResult]:
         primary_candidates = list(candidates[: self._primary_rerank_limit])
         try:
             return self._apply_rerank_scores(
                 candidates=primary_candidates,
-                scores=self._primary_reranker.rerank(
+                scores=await self._primary_reranker.rerank(
                     RerankRequest(
                         query=query,
                         documents=[candidate.payload.text for candidate in primary_candidates],
@@ -106,7 +107,7 @@ class HybridSearchService:
         try:
             return self._apply_rerank_scores(
                 candidates=secondary_candidates,
-                scores=self._secondary_reranker.rerank(
+                scores=await self._secondary_reranker.rerank(
                     RerankRequest(
                         query=query,
                         documents=[candidate.payload.text for candidate in secondary_candidates],
