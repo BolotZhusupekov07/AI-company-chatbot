@@ -19,6 +19,7 @@ from app.infrastructure.vector_store.qdrant.repository import QdrantVectorReposi
 from app.services.chat_answer.agent import get_chat_agent
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
+from app.services.chat_answer.schemas import ChatAgentOutput
 from app.services.hybrid_search_service import HybridSearchService
 from app.services.identity_resolution_service import LocalIdentityResolver
 
@@ -29,7 +30,7 @@ class ChatAnswerService:
     def __init__(
         self,
         settings: Annotated[Settings, Depends(get_settings)],
-        agent: Annotated[Agent[ChatAgentDeps, str], Depends(get_chat_agent)],
+        agent: Annotated[Agent[ChatAgentDeps, ChatAgentOutput], Depends(get_chat_agent)],
     ) -> None:
         self._settings = settings
         self._agent = agent
@@ -53,7 +54,7 @@ class ChatAnswerService:
                 max_tokens=self._settings.CHAT_LLM_MAX_TOKENS,
             ),
         )
-        answer = (result.output or "").strip()
+        answer = result.output.answer.strip()
         return answer or CHAT_ANSWER_NOT_FOUND_MESSAGE
 
     def _build_deps(self, user_email: str) -> ChatAgentDeps:

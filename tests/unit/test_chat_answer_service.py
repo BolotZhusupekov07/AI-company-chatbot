@@ -1,11 +1,10 @@
 """Chat answer service tests."""
 
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 import pytest
 
@@ -16,18 +15,19 @@ from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload
 from app.services.chat_answer import service as chat_answer_service
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
+from app.services.chat_answer.schemas import ChatAgentOutput
 from app.services.chat_answer.service import ChatAnswerService
 from app.services.chat_answer.tools import search_company_knowledge_tool
-from app.services.hybrid_search_service import HybridSearchResult, HybridSearchService
-from app.services.identity_resolution_service import LocalIdentityResolver, ResolvedIdentity
+from app.services.hybrid_search_service import HybridSearchResult
+from app.services.identity_resolution_service import ResolvedIdentity
 
 
 class FakeAgentResult(BaseModel):
-    output: str
+    output: ChatAgentOutput
 
 
 class FakeAgent:
-    def __init__(self, output: str) -> None:
+    def __init__(self, output: ChatAgentOutput) -> None:
         self.output = output
         self.calls: list[dict[str, Any]] = []
 
@@ -38,14 +38,21 @@ class FakeAgent:
 
 @pytest.mark.asyncio
 async def test_answer_calls_agent_with_message_history_and_model_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    agent = FakeAgent("Final answer")
+    agent = FakeAgent(
+        ChatAgentOutput(
+            answer="Final answer",
+            used_rag=True,
+            confidence=0.9,
+        )
+    )
     settings = Settings(CHAT_LLM_MAX_TOKENS=321)
     monkeypatch.setattr(chat_answer_service, "build_qdrant_client", lambda settings: object())
     monkeypatch.setattr(chat_answer_service, "BedrockCohereEmbeddingProvider", lambda region_name: object())
     monkeypatch.setattr(chat_answer_service, "QdrantVectorRepository", lambda **kwargs: object())
     monkeypatch.setattr(chat_answer_service, "BedrockCohereRerankProvider", lambda **kwargs: object())
     monkeypatch.setattr(chat_answer_service, "HybridSearchService", lambda **kwargs: object())
-    service = ChatAnswerService(settings, cast(Agent[ChatAgentDeps, str], agent))
+    agent_dependency: Any = agent
+    service = ChatAnswerService(settings, agent_dependency)
 
     history_messages = [
         _chat_message(index=1, role=Role.USER, content="Earlier question"),
@@ -117,10 +124,12 @@ def test_search_company_knowledge_tool_returns_first_hybrid_search_result() -> N
             ]
 
     hybrid_search_service = FakeHybridSearchService()
+    identity_resolver: Any = FakeIdentityResolver()
+    hybrid_search_dependency: Any = hybrid_search_service
     deps = ChatAgentDeps(
         user_email="AIDA@example.com",
-        identity_resolver=cast(LocalIdentityResolver, FakeIdentityResolver()),
-        hybrid_search_service=cast(HybridSearchService, hybrid_search_service),
+        identity_resolver=identity_resolver,
+        hybrid_search_service=hybrid_search_dependency,
     )
 
     answer = search_company_knowledge_tool(deps, query="vacation policy")
@@ -144,10 +153,12 @@ def test_search_company_knowledge_tool_returns_fallback_for_unknown_user() -> No
         def search(self, *, query: str, user_email: str, user_groups: list[str]) -> list[HybridSearchResult]:
             raise AssertionError("hybrid search service should not be called")
 
+    identity_resolver: Any = FakeIdentityResolver()
+    hybrid_search_service: Any = UnexpectedHybridSearchService()
     deps = ChatAgentDeps(
         user_email="unknown@example.com",
-        identity_resolver=cast(LocalIdentityResolver, FakeIdentityResolver()),
-        hybrid_search_service=cast(HybridSearchService, UnexpectedHybridSearchService()),
+        identity_resolver=identity_resolver,
+        hybrid_search_service=hybrid_search_service,
     )
 
     assert search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE

@@ -8,10 +8,11 @@ Decide whether the user's latest question needs company knowledge before answeri
 
 Use the `search_company_knowledge` tool when the question asks about company-specific facts, policies, processes,
 people, access, benefits, internal systems, or anything that should be grounded in the company knowledge base.
-If the tool returns "{CHAT_ANSWER_NOT_FOUND_MESSAGE}", return exactly "{CHAT_ANSWER_NOT_FOUND_MESSAGE}".
-When you use the tool, answer using only the retrieved tool result and the conversation history.
+If the tool returns "{CHAT_ANSWER_NOT_FOUND_MESSAGE}", set `answer` to exactly "{CHAT_ANSWER_NOT_FOUND_MESSAGE}",
+`used_rag` to true, and `confidence` to 0.
+When the tool returns text, answer using only the tool result and the conversation history. Set `used_rag` to true.
 
 Answer directly without calling the tool for greetings, small talk, clarification questions, and general knowledge that
-does not depend on company-specific information.
+does not depend on company-specific information. For those answers, set `used_rag` to false.
 Keep answers concise and do not invent company information.
 """.strip()
