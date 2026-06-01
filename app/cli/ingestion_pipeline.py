@@ -32,7 +32,18 @@ def main() -> None:
 
     # Store chunk embeddings in Qdrant vector store
     qdrant_client = build_qdrant_client(settings)
-    qdrant_repo = QdrantVectorRepository(client=qdrant_client, collection_name=settings.QDRANT_COLLECTION_NAME)
+    qdrant_repo = QdrantVectorRepository(
+        client=qdrant_client,
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        dense_vector_name=settings.QDRANT_DENSE_VECTOR_NAME,
+        sparse_vector_name=settings.QDRANT_SPARSE_VECTOR_NAME,
+        sparse_model_id=settings.QDRANT_BM25_MODEL_ID,
+        bm25_language=settings.QDRANT_BM25_LANGUAGE,
+        dense_search_limit=settings.HYBRID_DENSE_LIMIT,
+        sparse_search_limit=settings.HYBRID_SPARSE_LIMIT,
+        rrf_k=settings.HYBRID_RRF_K,
+        dense_score_threshold=settings.HYBRID_DENSE_SCORE_THRESHOLD,
+    )
     qdrant_repo.ensure_collection(vector_size=settings.QDRANT_VECTOR_SIZE)
 
     qdrant_repo.upsert_chunks(all_chunks, chunk_embeddings)
