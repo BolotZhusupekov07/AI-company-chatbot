@@ -157,3 +157,33 @@ class Chat(ChatSummary):
     """Chat detail response."""
 
     messages: list[ChatMessage]
+
+
+class ChatMessageStreamDelta(BaseModel):
+    """SSE payload for an assistant answer delta."""
+
+    chat_id: UUID
+    delta: str
+
+    model_config = ConfigDict(
+        alias_generator=alias_generators.to_camel,
+        validate_by_name=True,
+    )
+
+
+class ChatMessageStreamDone(BaseModel):
+    """SSE payload for the persisted final assistant message."""
+
+    chat_id: UUID
+    message: ChatMessage
+
+    model_config = ConfigDict(
+        alias_generator=alias_generators.to_camel,
+        validate_by_name=True,
+    )
+
+
+class ChatMessageStreamError(BaseModel):
+    """SSE payload for stream-time failures."""
+
+    detail: str

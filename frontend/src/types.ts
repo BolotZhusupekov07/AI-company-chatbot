@@ -44,3 +44,18 @@ export interface UpdateChatInput {
   title?: string;
   isPinned?: boolean;
 }
+
+export interface ChatMessageStreamDelta {
+  chatId: string;
+  delta: string;
+}
+
+export interface ChatMessageStreamDone {
+  chatId: string;
+  message: ChatMessage;
+}
+
+export interface ChatMessageStreamHandlers {
+  onDelta: (event: ChatMessageStreamDelta) => void;
+  onDone: (event: ChatMessageStreamDone) => void;
+}

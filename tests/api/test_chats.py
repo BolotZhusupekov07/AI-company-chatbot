@@ -1,6 +1,8 @@
 """Chat API tests."""
 
 from datetime import UTC, datetime, timedelta
+import json
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi_pagination import Page
@@ -363,3 +365,109 @@ class TestCreateChatMessage:
         chat = await service.get_chat(chat_id)
         assert [message.role for message in chat.messages] == [Role.USER, Role.AGENT]
         assert chat.messages[1].content == CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+
+class TestStreamChatMessage:
+    """POST /v1/chats/messages/stream."""
+
+    async def test_streams_new_chat_answer_and_persists_messages(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+        answer_service: StubChatAnswerService,
+    ) -> None:
+        user_email = f"stream-user-{uuid4()}@example.com"
+        answer_service.stream_chunks = ["Use ", "the VPN guide."]
+        answer_service.response = "Use the VPN guide."
+
+        response = await client.post(
+            "/v1/chats/messages/stream",
+            headers={"X-User-Email": user_email, "Accept": "text/event-stream"},
+            json={"content": "How do I access VPN?"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        events = _parse_sse_events(response.text)
+        assert [event_name for event_name, _payload in events] == ["message", "message", "done"]
+        assert events[0][1] == {"chatId": events[0][1]["chatId"], "delta": "Use "}
+        assert events[1][1] == {"chatId": events[0][1]["chatId"], "delta": "the VPN guide."}
+        assert events[2][1]["message"]["content"] == "Use the VPN guide."
+
+        chat_id = UUID(events[2][1]["chatId"])
+        service = ChatService(session)
+        chat = await service.get_chat(chat_id)
+        assert [message.role for message in chat.messages] == [Role.USER, Role.AGENT]
+        assert chat.messages[0].content == "How do I access VPN?"
+        assert chat.messages[1].content == "Use the VPN guide."
+        assert answer_service.calls == [
+            {
+                "question": "How do I access VPN?",
+                "user_email": user_email,
+                "message_history": [],
+            }
+        ]
+
+    async def test_streams_existing_chat_answer_with_history(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+        answer_service: StubChatAnswerService,
+    ) -> None:
+        service = ChatService(session)
+        user_email = f"existing-stream-user-{uuid4()}@example.com"
+        chat_id = await service.create_chat(user_email)
+        previous_user_message = await service.create_message(
+            ChatMessageCreate(chat_id=chat_id, content="Earlier question", role=Role.USER)
+        )
+        previous_agent_message = await service.create_message(
+            ChatMessageCreate(
+                chat_id=chat_id,
+                content="Earlier answer",
+                role=Role.AGENT,
+                message_id=previous_user_message.id,
+            )
+        )
+        answer_service.stream_chunks = ["Follow-up"]
+        answer_service.response = "Follow-up"
+
+        response = await client.post(
+            "/v1/chats/messages/stream",
+            headers={"X-User-Email": user_email, "Accept": "text/event-stream"},
+            json={"chatId": str(chat_id), "content": "Tell me more."},
+        )
+
+        assert response.status_code == 200
+        events = _parse_sse_events(response.text)
+        assert events[0][1] == {"chatId": str(chat_id), "delta": "Follow-up"}
+        assert answer_service.calls[0]["message_history"] == [
+            previous_user_message,
+            previous_agent_message,
+        ]
+
+    async def test_stream_returns_not_found_when_existing_chat_belongs_to_another_user(
+        self,
+        session: AsyncSession,
+        client: AsyncClient,
+    ) -> None:
+        service = ChatService(session)
+        chat_id = await service.create_chat(f"owner-{uuid4()}@example.com")
+
+        response = await client.post(
+            "/v1/chats/messages/stream",
+            headers={"X-User-Email": f"other-{uuid4()}@example.com", "Accept": "text/event-stream"},
+            json={"chatId": str(chat_id), "content": "Tell me about sick leave."},
+        )
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": f"Chat(id={chat_id}) not found"}
+
+
+def _parse_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
+    events = []
+    for frame in body.strip().split("\n\n"):
+        lines = frame.split("\n")
+        event_name = next(line.removeprefix("event: ") for line in lines if line.startswith("event: "))
+        data = next(line.removeprefix("data: ") for line in lines if line.startswith("data: "))
+        events.append((event_name, json.loads(data)))
+    return events

@@ -48,7 +48,11 @@ describe("App", () => {
   it("sends the first message for a new chat", async () => {
     const user = userEvent.setup();
     mockedChatApi.listChats.mockResolvedValue(pageOfChats([]));
-    mockedChatApi.createChatMessage.mockResolvedValue(agentMessage("Use the VPN guide.", "chat-new"));
+    mockedChatApi.streamChatMessage.mockImplementation(async (_input, handlers) => {
+      handlers.onDelta({ chatId: "chat-new", delta: "Use " });
+      handlers.onDelta({ chatId: "chat-new", delta: "the VPN guide." });
+      handlers.onDone({ chatId: "chat-new", message: agentMessage("Use the VPN guide.", "chat-new") });
+    });
     mockedChatApi.getChat.mockResolvedValue(
       chatDetail(vpnChat({ id: "chat-new" }), [agentMessage("Use the VPN guide.", "chat-new")]),
     );
@@ -60,10 +64,16 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(mockedChatApi.createChatMessage).toHaveBeenCalledWith({
-        content: "How do I access VPN?",
-        userEmail: "aida@example.com",
-      }),
+      expect(mockedChatApi.streamChatMessage).toHaveBeenCalledWith(
+        {
+          content: "How do I access VPN?",
+          userEmail: "aida@example.com",
+        },
+        expect.objectContaining({
+          onDelta: expect.any(Function),
+          onDone: expect.any(Function),
+        }),
+      ),
     );
     expect(await screen.findByText("Use the VPN guide.")).toBeInTheDocument();
   });
@@ -76,7 +86,10 @@ describe("App", () => {
       .mockResolvedValueOnce(
         chatDetail(vpnChat(), [agentMessage("Existing answer"), agentMessage("Follow-up answer")]),
       );
-    mockedChatApi.createChatMessage.mockResolvedValue(agentMessage("Follow-up answer"));
+    mockedChatApi.streamChatMessage.mockImplementation(async (_input, handlers) => {
+      handlers.onDelta({ chatId: "chat-vpn", delta: "Follow-up answer" });
+      handlers.onDone({ chatId: "chat-vpn", message: agentMessage("Follow-up answer") });
+    });
 
     render(<App />);
 
@@ -85,18 +98,24 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
-      expect(mockedChatApi.createChatMessage).toHaveBeenCalledWith({
-        chatId: "chat-vpn",
-        content: "Tell me more.",
-        userEmail: "aida@example.com",
-      }),
+      expect(mockedChatApi.streamChatMessage).toHaveBeenCalledWith(
+        {
+          chatId: "chat-vpn",
+          content: "Tell me more.",
+          userEmail: "aida@example.com",
+        },
+        expect.objectContaining({
+          onDelta: expect.any(Function),
+          onDone: expect.any(Function),
+        }),
+      ),
     );
   });
 
   it("renders API errors without losing the draft message", async () => {
     const user = userEvent.setup();
     mockedChatApi.listChats.mockResolvedValue(pageOfChats([]));
-    mockedChatApi.createChatMessage.mockRejectedValue(new Error("Model unavailable"));
+    mockedChatApi.streamChatMessage.mockRejectedValue(new Error("Model unavailable"));
 
     render(<App />);
 

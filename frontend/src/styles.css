@@ -295,9 +295,30 @@ textarea:focus {
   font-weight: 700;
 }
 
-.message p {
+.message-content {
+  display: grid;
+  gap: 9px;
+}
+
+.message-content p,
+.message-content ul {
   margin: 0;
+}
+
+.message-content p {
   white-space: pre-wrap;
+}
+
+.message-content ul {
+  padding-left: 20px;
+}
+
+.message-content li + li {
+  margin-top: 5px;
+}
+
+.message-content strong {
+  font-weight: 800;
 }
 
 .composer {

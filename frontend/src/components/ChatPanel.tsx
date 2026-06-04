@@ -1,5 +1,5 @@
 import { Check, Pencil, Send } from "lucide-react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import type { Chat, ChatMessage } from "../types";
 import { formatTimestamp, getMessageAuthor } from "../utils/chatFormat";
@@ -104,7 +104,103 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         <span>{getMessageAuthor(message)}</span>
         <time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>
       </div>
-      <p>{message.content}</p>
+      <MessageContent content={message.content} />
     </article>
   );
+}
+
+interface ParagraphBlock {
+  type: "paragraph";
+  lines: string[];
+}
+
+interface ListBlock {
+  type: "list";
+  items: string[];
+}
+
+type MessageBlock = ParagraphBlock | ListBlock;
+
+function MessageContent({ content }: { content: string }) {
+  return (
+    <div className="message-content">
+      {parseMessageBlocks(content).map((block, index) =>
+        block.type === "list" ? (
+          <ul key={index}>
+            {block.items.map((item, itemIndex) => (
+              <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+            ))}
+          </ul>
+        ) : (
+          <p key={index}>{renderInlineMarkdown(block.lines.join("\n"))}</p>
+        ),
+      )}
+    </div>
+  );
+}
+
+function parseMessageBlocks(content: string): MessageBlock[] {
+  const blocks: MessageBlock[] = [];
+  let paragraphLines: string[] = [];
+  let listItems: string[] = [];
+
+  function flushParagraph(): void {
+    if (paragraphLines.length > 0) {
+      blocks.push({ type: "paragraph", lines: paragraphLines });
+      paragraphLines = [];
+    }
+  }
+
+  function flushList(): void {
+    if (listItems.length > 0) {
+      blocks.push({ type: "list", items: listItems });
+      listItems = [];
+    }
+  }
+
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trimEnd();
+    const trimmedLine = line.trim();
+
+    if (trimmedLine.length === 0) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    if (trimmedLine.startsWith("- ")) {
+      flushParagraph();
+      listItems.push(trimmedLine.slice(2));
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const boldPattern = /\*\*([^*]+)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = boldPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+
+    nodes.push(<strong key={`${match.index}-${match[1]}`}>{match[1]}</strong>);
+    lastIndex = boldPattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
 }

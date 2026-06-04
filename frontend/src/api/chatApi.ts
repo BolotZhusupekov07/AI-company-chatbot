@@ -2,6 +2,9 @@ import type {
   Chat,
   ChatListItem,
   ChatMessage,
+  ChatMessageStreamDelta,
+  ChatMessageStreamDone,
+  ChatMessageStreamHandlers,
   CreateChatMessageInput,
   Page,
   UpdateChatInput,
@@ -48,6 +51,33 @@ export async function createChatMessage(input: CreateChatMessageInput): Promise<
     headers: jsonHeaders({ "X-User-Email": input.userEmail }),
     body: JSON.stringify(body),
   });
+}
+
+export async function streamChatMessage(
+  input: CreateChatMessageInput,
+  handlers: ChatMessageStreamHandlers,
+): Promise<void> {
+  const body = input.chatId ? { chatId: input.chatId, content: input.content } : { content: input.content };
+  const response = await fetch(`${API_BASE_PATH}/chats/messages/stream`, {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "X-User-Email": input.userEmail,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const details = await parseResponseBody(response);
+    throw new ChatApiError(readErrorMessage(details, response.statusText), response.status, details);
+  }
+
+  if (!response.body) {
+    throw new ChatApiError("Streaming response body is unavailable.", response.status, response.statusText);
+  }
+
+  await readSseStream(response.body, handlers);
 }
 
 export async function updateChat(chatId: string, input: UpdateChatInput): Promise<ChatListItem> {
@@ -110,4 +140,58 @@ function readErrorMessage(details: unknown, fallback: string): string {
     }
   }
   return fallback || "Request failed";
+}
+
+async function readSseStream(body: ReadableStream<Uint8Array>, handlers: ChatMessageStreamHandlers): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      handleSseFrame(frame, handlers);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim().length > 0) {
+    handleSseFrame(buffer, handlers);
+  }
+}
+
+function handleSseFrame(frame: string, handlers: ChatMessageStreamHandlers): void {
+  const lines = frame.split("\n");
+  const event = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+  const data = lines
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => line.slice("data: ".length))
+    .join("\n");
+
+  if (!event || data.length === 0) {
+    return;
+  }
+
+  if (event === "message") {
+    handlers.onDelta(JSON.parse(data) as ChatMessageStreamDelta);
+    return;
+  }
+
+  if (event === "done") {
+    handlers.onDone(JSON.parse(data) as ChatMessageStreamDone);
+    return;
+  }
+
+  if (event === "error") {
+    const parsed = JSON.parse(data) as { detail?: string };
+    throw new ChatApiError(parsed.detail ?? "Streaming request failed.", 200, parsed);
+  }
 }

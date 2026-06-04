@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createChatMessage, deleteChat, getChat, listChats, updateChat } from "./chatApi";
+import { createChatMessage, deleteChat, getChat, listChats, streamChatMessage, updateChat } from "./chatApi";
 
 const fetchMock = vi.fn();
 
@@ -69,6 +69,57 @@ describe("chatApi", () => {
     });
   });
 
+  it("streams a chat message through the local API proxy", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        'event: message\ndata: {"chatId":"chat-1","delta":"Use "}\n\n',
+        'event: done\ndata: {"chatId":"chat-1","message":{"id":"message-1","chatId":"chat-1","role":"AGENT","content":"Use VPN.","language":"RU","createdAt":"2026-06-04T09:01:00","updatedAt":"2026-06-04T09:01:00"}}\n\n',
+      ]),
+    );
+    const onDelta = vi.fn();
+    const onDone = vi.fn();
+
+    await streamChatMessage(
+      { content: "How do I access VPN?", userEmail: "aida@example.com" },
+      { onDelta, onDone },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith("/v1/chats/messages/stream", {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+        "X-User-Email": "aida@example.com",
+      },
+      body: JSON.stringify({ content: "How do I access VPN?" }),
+    });
+    expect(onDelta).toHaveBeenCalledWith({ chatId: "chat-1", delta: "Use " });
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat-1",
+        message: expect.objectContaining({ content: "Use VPN." }),
+      }),
+    );
+  });
+
+  it("parses SSE events split across response chunks", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        'event: message\ndata: {"chatId":"chat-1","delta":"Hel',
+        'lo"}\n\n',
+        'event: done\ndata: {"chatId":"chat-1","message":{"id":"message-1","chatId":"chat-1","role":"AGENT","content":"Hello","language":"RU","createdAt":"2026-06-04T09:01:00","updatedAt":"2026-06-04T09:01:00"}}\n\n',
+      ]),
+    );
+    const onDelta = vi.fn();
+
+    await streamChatMessage(
+      { chatId: "chat-1", content: "Hi", userEmail: "aida@example.com" },
+      { onDelta, onDone: vi.fn() },
+    );
+
+    expect(onDelta).toHaveBeenCalledWith({ chatId: "chat-1", delta: "Hello" });
+  });
+
   it("updates only the changed chat fields", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: "chat-1", title: "VPN access", isPinned: true }));
 
@@ -115,4 +166,22 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function streamResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    },
+  );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { ChatApiError, createChatMessage, deleteChat, getChat, listChats, updateChat } from "./api/chatApi";
+import { ChatApiError, deleteChat, getChat, listChats, streamChatMessage, updateChat } from "./api/chatApi";
 import { ChatPanel } from "./components/ChatPanel";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { Sidebar } from "./components/Sidebar";
@@ -125,10 +125,30 @@ export default function App() {
     }
 
     try {
-      const answer = await createChatMessage({ chatId: selectedChatId ?? undefined, content, userEmail });
-      setSelectedChatId(answer.chatId);
-      await loadChat(answer.chatId, userEmail);
-      await loadChats(userEmail, answer.chatId);
+      let completedChatId = selectedChatId;
+      const pendingAgentMessageId = `pending-agent-${Date.now()}`;
+
+      await streamChatMessage(
+        { chatId: selectedChatId ?? undefined, content, userEmail },
+        {
+          onDelta: (event) => {
+            completedChatId = event.chatId;
+            setActiveChat((currentChat) =>
+              appendAgentDelta(currentChat, event.chatId, pendingAgentMessageId, event.delta, userEmail),
+            );
+          },
+          onDone: (event) => {
+            completedChatId = event.chatId;
+            setActiveChat((currentChat) => replacePendingAgentMessage(currentChat, pendingAgentMessageId, event.message));
+          },
+        },
+      );
+
+      if (completedChatId) {
+        setSelectedChatId(completedChatId);
+        await loadChat(completedChatId, userEmail);
+        await loadChats(userEmail, completedChatId);
+      }
     } catch (error) {
       setDraft(content);
       setActiveChat(previousChat);
@@ -248,6 +268,71 @@ function buildTemporaryUserMessage(content: string, chatId: string): ChatMessage
     language: "RU",
     createdAt: timestamp,
     updatedAt: timestamp,
+  };
+}
+
+function appendAgentDelta(
+  chat: Chat | null,
+  chatId: string,
+  pendingMessageId: string,
+  delta: string,
+  userEmail: string,
+): Chat {
+  const timestamp = new Date().toISOString();
+  const currentChat =
+    chat ??
+    ({
+      id: chatId,
+      title: "New chat",
+      isPinned: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      userEmail,
+      messages: [],
+    } satisfies Chat);
+  const existingMessage = currentChat.messages.find((message) => message.id === pendingMessageId);
+
+  if (!existingMessage) {
+    return {
+      ...currentChat,
+      id: chatId,
+      messages: [
+        ...currentChat.messages,
+        {
+          id: pendingMessageId,
+          chatId,
+          role: "AGENT",
+          content: delta,
+          language: "RU",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    };
+  }
+
+  return {
+    ...currentChat,
+    id: chatId,
+    messages: currentChat.messages.map((message) =>
+      message.id === pendingMessageId ? { ...message, content: `${message.content}${delta}` } : message,
+    ),
+  };
+}
+
+function replacePendingAgentMessage(chat: Chat | null, pendingMessageId: string, message: ChatMessage): Chat | null {
+  if (!chat) {
+    return null;
+  }
+
+  const hasPendingMessage = chat.messages.some((item) => item.id === pendingMessageId);
+
+  return {
+    ...chat,
+    id: message.chatId,
+    messages: hasPendingMessage
+      ? chat.messages.map((item) => (item.id === pendingMessageId ? message : item))
+      : [...chat.messages, message],
   };
 }
 
