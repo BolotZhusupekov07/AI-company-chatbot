@@ -1,6 +1,7 @@
 """Chat answer agent tools."""
 
 from pydantic_ai import ModelRetry
+
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.schemas import ChatAgentOutput

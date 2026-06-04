@@ -14,12 +14,11 @@ from app.core.config import Settings
 from app.core.enums import Language, Role
 from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload
 from app.services.chat_answer import service as chat_answer_service
-from app.services.chat_answer.tools import validate_citation_verified_output_tool
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.schemas import ChatAgentOutput
 from app.services.chat_answer.service import ChatAnswerService
-from app.services.chat_answer.tools import search_company_knowledge_tool
+from app.services.chat_answer.tools import search_company_knowledge_tool, validate_citation_verified_output_tool
 from app.services.hybrid_search_service import HybridSearchResult
 from app.services.identity_resolution_service import ResolvedIdentity
 
