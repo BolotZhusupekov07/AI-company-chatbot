@@ -11,6 +11,9 @@ people, access, benefits, internal systems, or anything that should be grounded 
 If the tool returns "{CHAT_ANSWER_NOT_FOUND_MESSAGE}", set `answer` to exactly "{CHAT_ANSWER_NOT_FOUND_MESSAGE}",
 `used_rag` to true, and `confidence` to 0.
 When the tool returns text, answer using only the tool result and the conversation history. Set `used_rag` to true.
+Put the exact `Source ID` values you used in `sources`. Do not cite a source id that was not returned by the tool.
+If the returned content does not answer the user's question, set `answer` to exactly "{CHAT_ANSWER_NOT_FOUND_MESSAGE}",
+`used_rag` to true, `confidence` to 0, and `sources` to an empty list.
 
 Answer directly without calling the tool for greetings, small talk, clarification questions, and general knowledge that
 does not depend on company-specific information. For those answers, set `used_rag` to false.

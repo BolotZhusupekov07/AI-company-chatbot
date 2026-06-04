@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
+from pydantic_ai import ModelRetry
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 import pytest
 
@@ -13,6 +14,7 @@ from app.core.config import Settings
 from app.core.enums import Language, Role
 from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload
 from app.services.chat_answer import service as chat_answer_service
+from app.services.chat_answer.tools import validate_citation_verified_output_tool
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.schemas import ChatAgentOutput
@@ -141,7 +143,24 @@ async def test_search_company_knowledge_tool_returns_grounded_source_excerpt() -
                     rrf_score=0.2,
                     rerank_score=0.95,
                     rerank_provider="bedrock-cohere",
-                )
+                ),
+                HybridSearchResult(
+                    payload=QdrantChunkPayload(
+                        chunk_id="chunk-2",
+                        source_id="source-2",
+                        document_group_id="hr",
+                        language="en",
+                        space="company",
+                        allowed_users=[],
+                        allowed_groups=["employees"],
+                        text="Vacation policy details",
+                        chunk_index=1,
+                        character_count=23,
+                    ),
+                    rrf_score=0.1,
+                    rerank_score=0.82,
+                    rerank_provider="bedrock-cohere",
+                ),
             ]
 
     hybrid_search_service = FakeHybridSearchService()
@@ -155,7 +174,12 @@ async def test_search_company_knowledge_tool_returns_grounded_source_excerpt() -
 
     answer = await search_company_knowledge_tool(deps, query="vacation policy")
 
-    assert answer == "Content: Vacation policy answer\n\nSource ID: source-1"
+    assert answer == (
+        "Source ID: source-1\nContent:\nVacation policy answer"
+        "\n\n---\n\n"
+        "Source ID: source-2\nContent:\nVacation policy details"
+    )
+    assert deps.retrieved_source_ids == ["source-1", "source-2"]
     assert hybrid_search_service.calls == [
         {
             "query": "vacation policy",
@@ -184,6 +208,72 @@ async def test_search_company_knowledge_tool_returns_fallback_for_unknown_user()
     )
 
     assert await search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+
+def test_validate_citation_verified_output_accepts_retrieved_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/vacation-policy.en.md"],
+    )
+
+    assert validate_citation_verified_output_tool(output, deps) == output
+
+
+def test_validate_citation_verified_output_rejects_rag_answer_without_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=[],
+    )
+
+    with pytest.raises(ModelRetry, match="include at least one source"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_rejects_unknown_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/unknown.en.md"],
+    )
+
+    with pytest.raises(ModelRetry, match="not returned by the search tool"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_requires_not_found_when_no_sources_were_retrieved() -> None:
+    deps = _chat_agent_deps("unknown@example.com", Settings())
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/vacation-policy.en.md"],
+    )
+
+    with pytest.raises(ModelRetry, match="return the not-found answer"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_accepts_not_found_without_retrieved_sources() -> None:
+    deps = _chat_agent_deps("unknown@example.com", Settings())
+    output = ChatAgentOutput(
+        answer=CHAT_ANSWER_NOT_FOUND_MESSAGE,
+        used_rag=True,
+        confidence=0.0,
+        sources=[],
+    )
+
+    assert validate_citation_verified_output_tool(output, deps) == output
 
 
 def _chat_agent_deps(user_email: str, settings: Settings) -> ChatAgentDeps:

@@ -10,7 +10,7 @@ from app.services.chat_answer.bedrock.model import get_chat_bedrock_model
 from app.services.chat_answer.dependencies import ChatAgentDeps
 from app.services.chat_answer.prompts import CHAT_AGENT_INSTRUCTIONS
 from app.services.chat_answer.schemas import ChatAgentOutput
-from app.services.chat_answer.tools import search_company_knowledge_tool
+from app.services.chat_answer.tools import search_company_knowledge_tool, validate_citation_verified_output_tool
 
 
 def build_chat_agent(model: BedrockConverseModel) -> Agent[ChatAgentDeps, ChatAgentOutput]:
@@ -28,6 +28,12 @@ def build_chat_agent(model: BedrockConverseModel) -> Agent[ChatAgentDeps, ChatAg
         """Search company knowledge for company-specific facts, policies, processes, access, or internal systems."""
 
         return await search_company_knowledge_tool(ctx.deps, query=query)
+
+    @agent.output_validator
+    def validate_output(ctx: RunContext[ChatAgentDeps], output: ChatAgentOutput) -> ChatAgentOutput:
+        """Reject RAG answers that cite sources the search tool did not return."""
+
+        return validate_citation_verified_output_tool(output, ctx.deps)
 
     return agent
 
