@@ -36,8 +36,9 @@ async def test_openai_rerank_service_uses_pydantic_ai_agent_structured_output() 
             ]
         )
     )
+    agent_dependency: Any = agent
     service = OpenAIRerankService(
-        agent=agent,
+        agent=agent_dependency,
         timeout_seconds=12.0,
     )
 

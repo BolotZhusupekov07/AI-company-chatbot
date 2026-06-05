@@ -199,6 +199,35 @@ API docs:
 
 Health checks and chat endpoints are available through the FastAPI app.
 
+## Run The Frontend
+
+The chat web app lives in `frontend/` and connects to the FastAPI API through a Vite development proxy.
+
+Install frontend dependencies:
+
+```bash
+cd frontend
+npm install
+```
+
+Run the backend in one terminal:
+
+```bash
+make run
+```
+
+Run the frontend in another terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open the printed Vite URL, usually http://localhost:5173.
+
+The app defaults to `aida@example.com` and stores the active user email in browser storage. The backend must still have
+PostgreSQL migrations applied, Qdrant running, and knowledge ingested for real retrieval-backed answers.
+
 ## Run CLI Script
 
 ### Ingest Knowledge Into Qdrant

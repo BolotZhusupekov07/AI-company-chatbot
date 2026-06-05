@@ -1,6 +1,6 @@
 """Chat answer agent dependencies."""
 
-from pydantic import BaseModel, ConfigDict, SkipValidation
+from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 
 from app.core.config import Settings
 from app.infrastructure.embeddings.bedrock_cohere_provider import BedrockCohereEmbeddingProvider
@@ -20,6 +20,14 @@ class ChatAgentDeps(BaseModel):
     user_email: str
     identity_resolver: SkipValidation[LocalIdentityResolver]
     hybrid_search_service: SkipValidation[HybridSearchService]
+    retrieved_source_ids: list[str] = Field(default_factory=list)
+
+    def remember_retrieved_source_id(self, source_id: str) -> None:
+        """Remember a source id returned by the knowledge search tool during this agent run."""
+
+        normalized_source_id = source_id.strip()
+        if normalized_source_id and normalized_source_id not in self.retrieved_source_ids:
+            self.retrieved_source_ids.append(normalized_source_id)
 
 
 def get_chat_agent_deps(user_email: str, settings: Settings):

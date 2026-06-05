@@ -1,10 +1,12 @@
 """Chat answer service tests."""
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
+from pydantic_ai import ModelRetry
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 import pytest
 
@@ -15,9 +17,12 @@ from app.infrastructure.vector_store.qdrant.schemas import QdrantChunkPayload
 from app.services.chat_answer import service as chat_answer_service
 from app.services.chat_answer.constants import CHAT_ANSWER_NOT_FOUND_MESSAGE
 from app.services.chat_answer.dependencies import ChatAgentDeps
-from app.services.chat_answer.schemas import ChatAgentOutput
+from app.services.chat_answer.schemas import ChatAgentOutput, ChatAnswerStreamComplete, ChatAnswerStreamDelta
 from app.services.chat_answer.service import ChatAnswerService
-from app.services.chat_answer.tools import search_company_knowledge_tool
+from app.services.chat_answer.tools import (
+    search_company_knowledge_tool,
+    validate_citation_verified_output_tool,
+)
 from app.services.hybrid_search_service import HybridSearchResult
 from app.services.identity_resolution_service import ResolvedIdentity
 
@@ -36,6 +41,33 @@ class FakeAgent:
         return FakeAgentResult(output=self.output)
 
 
+class FakeStreamedTextAgentResult:
+    def __init__(self, chunks: list[str]) -> None:
+        self.chunks = chunks
+
+    async def __aenter__(self) -> "FakeStreamedTextAgentResult":
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    async def stream_text(self, *, delta: bool, debounce_by: float | None) -> AsyncGenerator[str]:
+        assert delta is True
+        assert debounce_by is None
+        for chunk in self.chunks:
+            yield chunk
+
+
+class FakeStreamingAgent:
+    def __init__(self, chunks: list[str]) -> None:
+        self.chunks = chunks
+        self.stream_calls: list[dict[str, Any]] = []
+
+    def run_stream(self, user_prompt: str, **kwargs: Any) -> FakeStreamedTextAgentResult:
+        self.stream_calls.append({"user_prompt": user_prompt, **kwargs})
+        return FakeStreamedTextAgentResult(self.chunks)
+
+
 @pytest.mark.asyncio
 async def test_answer_calls_agent_with_message_history_and_model_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     agent = FakeAgent(
@@ -48,7 +80,8 @@ async def test_answer_calls_agent_with_message_history_and_model_settings(monkey
     settings = Settings(CHAT_LLM_MAX_TOKENS=321)
     monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
     agent_dependency: Any = agent
-    service = ChatAnswerService(settings, agent_dependency)
+    streaming_agent_dependency: Any = FakeStreamingAgent([])
+    service = ChatAnswerService(settings, agent_dependency, streaming_agent_dependency)
 
     history_messages = [
         _chat_message(index=1, role=Role.USER, content="Earlier question"),
@@ -89,7 +122,8 @@ async def test_answer_appends_sources_from_agent_output(monkeypatch: pytest.Monk
     )
     monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
     agent_dependency: Any = agent
-    service = ChatAnswerService(Settings(), agent_dependency)
+    streaming_agent_dependency: Any = FakeStreamingAgent([])
+    service = ChatAnswerService(Settings(), agent_dependency, streaming_agent_dependency)
 
     answer = await service.answer(
         question="Vacation policy?",
@@ -98,6 +132,98 @@ async def test_answer_appends_sources_from_agent_output(monkeypatch: pytest.Monk
     )
 
     assert answer == "Employees receive 20 paid vacation days per year.\n\nSources: hr/vacation-policy.en.md"
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_emits_answer_deltas_and_final_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = FakeAgent(ChatAgentOutput(answer="Unused sync answer", used_rag=False, confidence=0.9))
+    streaming_agent = FakeStreamingAgent(["Employees", " receive", " 20 paid vacation days per year."])
+    settings = Settings(CHAT_LLM_MAX_TOKENS=321)
+    monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
+    agent_dependency: Any = agent
+    streaming_agent_dependency: Any = streaming_agent
+    service = ChatAnswerService(settings, agent_dependency, streaming_agent_dependency)
+
+    events = [
+        event
+        async for event in service.stream_answer(
+            question="Vacation policy?",
+            user_email="aida@example.com",
+            message_history=[_chat_message(index=1, role=Role.USER, content="Earlier question")],
+        )
+    ]
+
+    delta_events = events[:-1]
+    complete_event = events[-1]
+    assert all(isinstance(event, ChatAnswerStreamDelta) for event in delta_events)
+    assert isinstance(complete_event, ChatAnswerStreamComplete)
+    assert [event.delta for event in delta_events if isinstance(event, ChatAnswerStreamDelta)] == [
+        "Employees",
+        " receive",
+        " 20 paid vacation days per year.",
+    ]
+    assert complete_event.answer == "Employees receive 20 paid vacation days per year."
+    call = streaming_agent.stream_calls[0]
+    assert call["user_prompt"] == "Vacation policy?"
+    assert call["deps"].user_email == "aida@example.com"
+    assert call["model_settings"]["max_tokens"] == 321
+    assert isinstance(call["message_history"][0], ModelRequest)
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_returns_fallback_when_text_stream_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = FakeAgent(ChatAgentOutput(answer="Unused sync answer", used_rag=False, confidence=0.9))
+    streaming_agent = FakeStreamingAgent([])
+    monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
+    agent_dependency: Any = agent
+    streaming_agent_dependency: Any = streaming_agent
+    service = ChatAnswerService(Settings(), agent_dependency, streaming_agent_dependency)
+
+    events = [
+        event
+        async for event in service.stream_answer(
+            question="Vacation policy?",
+            user_email="aida@example.com",
+            message_history=[],
+        )
+    ]
+
+    assert events == [ChatAnswerStreamComplete(answer=CHAT_ANSWER_NOT_FOUND_MESSAGE)]
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_completes_with_accumulated_text_without_service_side_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = FakeAgent(ChatAgentOutput(answer="Unused sync answer", used_rag=False, confidence=0.9))
+    streaming_agent = FakeStreamingAgent(
+        [
+            "Employees can use any entrance.",
+            "\n\nSources: company/unknown.en.md",
+        ]
+    )
+    monkeypatch.setattr(chat_answer_service, "get_chat_agent_deps", _chat_agent_deps)
+    agent_dependency: Any = agent
+    streaming_agent_dependency: Any = streaming_agent
+    service = ChatAnswerService(Settings(), agent_dependency, streaming_agent_dependency)
+
+    events = [
+        event
+        async for event in service.stream_answer(
+            question="How can employees access the office?",
+            user_email="aida@example.com",
+            message_history=[],
+        )
+    ]
+
+    delta_events = [event for event in events if isinstance(event, ChatAnswerStreamDelta)]
+    complete_event = events[-1]
+    assert [event.delta for event in delta_events] == [
+        "Employees can use any entrance.",
+        "\n\nSources: company/unknown.en.md",
+    ]
+    assert isinstance(complete_event, ChatAnswerStreamComplete)
+    assert complete_event.answer == "Employees can use any entrance.\n\nSources: company/unknown.en.md"
 
 
 @pytest.mark.asyncio
@@ -141,7 +267,24 @@ async def test_search_company_knowledge_tool_returns_grounded_source_excerpt() -
                     rrf_score=0.2,
                     rerank_score=0.95,
                     rerank_provider="bedrock-cohere",
-                )
+                ),
+                HybridSearchResult(
+                    payload=QdrantChunkPayload(
+                        chunk_id="chunk-2",
+                        source_id="source-2",
+                        document_group_id="hr",
+                        language="en",
+                        space="company",
+                        allowed_users=[],
+                        allowed_groups=["employees"],
+                        text="Vacation policy details",
+                        chunk_index=1,
+                        character_count=23,
+                    ),
+                    rrf_score=0.1,
+                    rerank_score=0.82,
+                    rerank_provider="bedrock-cohere",
+                ),
             ]
 
     hybrid_search_service = FakeHybridSearchService()
@@ -155,7 +298,12 @@ async def test_search_company_knowledge_tool_returns_grounded_source_excerpt() -
 
     answer = await search_company_knowledge_tool(deps, query="vacation policy")
 
-    assert answer == "Content: Vacation policy answer\n\nSource ID: source-1"
+    assert answer == (
+        "Source ID: source-1\nContent:\nVacation policy answer"
+        "\n\n---\n\n"
+        "Source ID: source-2\nContent:\nVacation policy details"
+    )
+    assert deps.retrieved_source_ids == ["source-1", "source-2"]
     assert hybrid_search_service.calls == [
         {
             "query": "vacation policy",
@@ -184,6 +332,72 @@ async def test_search_company_knowledge_tool_returns_fallback_for_unknown_user()
     )
 
     assert await search_company_knowledge_tool(deps, query="policy") == CHAT_ANSWER_NOT_FOUND_MESSAGE
+
+
+def test_validate_citation_verified_output_accepts_retrieved_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/vacation-policy.en.md"],
+    )
+
+    assert validate_citation_verified_output_tool(output, deps) == output
+
+
+def test_validate_citation_verified_output_rejects_rag_answer_without_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=[],
+    )
+
+    with pytest.raises(ModelRetry, match="include at least one source"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_rejects_unknown_source() -> None:
+    deps = _chat_agent_deps("aida@example.com", Settings())
+    deps.retrieved_source_ids.append("hr/vacation-policy.en.md")
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/unknown.en.md"],
+    )
+
+    with pytest.raises(ModelRetry, match="not returned by the search tool"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_requires_not_found_when_no_sources_were_retrieved() -> None:
+    deps = _chat_agent_deps("unknown@example.com", Settings())
+    output = ChatAgentOutput(
+        answer="Employees receive 20 paid vacation days per year.",
+        used_rag=True,
+        confidence=0.9,
+        sources=["hr/vacation-policy.en.md"],
+    )
+
+    with pytest.raises(ModelRetry, match="return the not-found answer"):
+        validate_citation_verified_output_tool(output, deps)
+
+
+def test_validate_citation_verified_output_accepts_not_found_without_retrieved_sources() -> None:
+    deps = _chat_agent_deps("unknown@example.com", Settings())
+    output = ChatAgentOutput(
+        answer=CHAT_ANSWER_NOT_FOUND_MESSAGE,
+        used_rag=True,
+        confidence=0.0,
+        sources=[],
+    )
+
+    assert validate_citation_verified_output_tool(output, deps) == output
 
 
 def _chat_agent_deps(user_email: str, settings: Settings) -> ChatAgentDeps:

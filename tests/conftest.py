@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.infrastructure.db.database import Base, get_session
 import app.infrastructure.db.models.chat
 from app.main import create_app
+from app.services.chat_answer.schemas import ChatAnswerStreamComplete, ChatAnswerStreamDelta
 from app.services.chat_answer.service import ChatAnswerService
 
 TEST_HOST = "http://test"
@@ -22,6 +23,7 @@ class StubChatAnswerService:
 
     def __init__(self) -> None:
         self.response = "Retrieved answer"
+        self.stream_chunks = ["Retrieved ", "answer"]
         self.calls: list[dict[str, object]] = []
 
     async def answer(self, *, question: str, user_email: str, message_history: object) -> str:
@@ -33,6 +35,18 @@ class StubChatAnswerService:
             }
         )
         return self.response
+
+    async def stream_answer(self, *, question: str, user_email: str, message_history: object) -> AsyncGenerator[object]:
+        self.calls.append(
+            {
+                "question": question,
+                "user_email": user_email,
+                "message_history": message_history,
+            }
+        )
+        for chunk in self.stream_chunks:
+            yield ChatAnswerStreamDelta(delta=chunk)
+        yield ChatAnswerStreamComplete(answer=self.response)
 
 
 @pytest.fixture
